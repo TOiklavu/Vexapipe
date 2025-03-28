@@ -7,28 +7,33 @@ import shutil
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
-                             QTableWidget, QTableWidgetItem, QComboBox)
-from PyQt5.QtGui import QPixmap, QIcon, QColor  # Thêm import QColor
+                             QTableWidget, QTableWidgetItem, QComboBox, QMessageBox)
+from PyQt5.QtGui import QPixmap, QIcon, QColor
 from PyQt5.QtCore import Qt
 from utils.paths import get_project_data_path
 from utils.dialogs import AddAssetDialog
 
 BLENDER_PATH = "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe"
-TEMPLATE_BLEND_FILE = "D:/OneDrive/Desktop/Projects/template.blend"
-DEFAULT_THUMBNAIL = "D:/OneDrive/Desktop/Projects/default_thumbnail.jpg"
+TEMPLATE_BLEND_FILE = "D:/OneDrive/Desktop/Projects/Vexapipe/template.blend"
+DEFAULT_THUMBNAIL = "D:/OneDrive/Desktop/Projects/Vexapipe/default_thumbnail.jpg"
+USERS_FILE = "D:/OneDrive/Desktop/Projects/Vexapipe/users.json"
 
 class AssetManager(QMainWindow):
-    def __init__(self, project_path, show_lobby_callback):
+    def __init__(self, project_path, show_lobby_callback, current_user):
         super().__init__()
         self.project_path = project_path
         self.show_lobby_callback = show_lobby_callback
+        self.current_user = current_user  # Lưu thông tin người dùng hiện tại
         self.project_name = os.path.basename(project_path)
-        self.setWindowTitle(f"Blender Asset Manager - {self.project_name}")
+        self.setWindowTitle(f"Blender Asset Manager - {self.project_name} (Logged in as {self.current_user['username']})")
         self.setGeometry(100, 100, 800, 600)
 
         self.data_file = get_project_data_path(project_path)
         self.assets = self.load_data()
         self.project_short = self.assets.get("short", self.project_name)
+
+        # Lấy danh sách người dùng từ users.json
+        self.team_members = self.load_team_members()
 
         self.current_file = None
         self.current_thumbnail = None
@@ -46,7 +51,7 @@ class AssetManager(QMainWindow):
         }
 
         self.left_widget = None
-        self.asset_table = None  # Bảng database
+        self.asset_table = None
 
         self.init_ui()
 
@@ -140,6 +145,13 @@ class AssetManager(QMainWindow):
             }
         """)
 
+    def load_team_members(self):
+        if os.path.exists(USERS_FILE):
+            with open(USERS_FILE, 'r') as f:
+                users_data = json.load(f)
+                return [user["username"] for user in users_data["users"]]
+        return []
+
     def load_data(self):
         if os.path.exists(self.data_file):
             with open(self.data_file, 'r') as f:
@@ -218,14 +230,12 @@ class AssetManager(QMainWindow):
         self.tabs.addTab(self.media_tab, QIcon(media_icon_path) if os.path.exists(media_icon_path) else QIcon(), "Media")
         self.tabs.addTab(self.libraries_tab, QIcon(libraries_icon_path) if os.path.exists(libraries_icon_path) else QIcon(), "Libraries")
 
-        # Thêm bảng database vào tab Scenes
         scenes_layout = QVBoxLayout(self.scenes_tab)
         self.asset_table = QTableWidget()
         self.asset_table.setColumnCount(4)
         self.asset_table.setHorizontalHeaderLabels(["Asset Name", "Asset Type", "Status", "Assignee"])
         self.asset_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.asset_table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed)
-        self.asset_table.cellChanged.connect(self.on_cell_changed)
+        self.asset_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Không cho chỉnh sửa trực tiếp
         scenes_layout.addWidget(self.asset_table)
 
         self.detail_widget = QWidget()
@@ -326,28 +336,27 @@ class AssetManager(QMainWindow):
                 section_btn.setText(f"{asset_type} ({type_counts[asset_type]})")
             self.asset_lists[asset_type].setVisible(self.section_states[asset_type])
 
-        # Cập nhật bảng database
         self.update_asset_table()
 
     def update_asset_table(self):
         self.asset_table.setRowCount(len(self.assets["assets"]))
         status_options = ["To Do", "Inprogress", "Pending Review", "Done"]
         status_colors = {
-            "To Do": "#ff5555",          # Đỏ
-            "Inprogress": "#55aaff",     # Xanh dương
-            "Pending Review": "#ffaa00", # Cam
-            "Done": "#55ff55"            # Xanh lá
+            "To Do": "#ff5555",
+            "Inprogress": "#55aaff",
+            "Pending Review": "#ffaa00",
+            "Done": "#55ff55"
         }
 
         for row, asset in enumerate(self.assets["assets"]):
             # Cột Asset Name
             name_item = QTableWidgetItem(asset["name"])
-            name_item.setFlags(name_item.flags() ^ Qt.ItemIsEditable)  # Không cho chỉnh sửa
+            name_item.setFlags(name_item.flags() ^ Qt.ItemIsEditable)
             self.asset_table.setItem(row, 0, name_item)
 
             # Cột Asset Type
             type_item = QTableWidgetItem(asset["type"])
-            type_item.setFlags(type_item.flags() ^ Qt.ItemIsEditable)  # Không cho chỉnh sửa
+            type_item.setFlags(type_item.flags() ^ Qt.ItemIsEditable)
             self.asset_table.setItem(row, 1, type_item)
 
             # Cột Status
@@ -357,13 +366,17 @@ class AssetManager(QMainWindow):
             status_combo.setCurrentText(current_status)
             status_combo.currentIndexChanged.connect(lambda index, r=row: self.on_status_changed(r, index))
             self.asset_table.setCellWidget(row, 2, status_combo)
-            # Áp dụng màu cho ô Status
             self.asset_table.setItem(row, 2, QTableWidgetItem())
             self.asset_table.item(row, 2).setBackground(QColor(status_colors[current_status]))
 
             # Cột Assignee
-            assignee_item = QTableWidgetItem(asset.get("assignee", ""))
-            self.asset_table.setItem(row, 3, assignee_item)
+            assignee_combo = QComboBox()
+            assignee_combo.addItem("")  # Lựa chọn trống
+            assignee_combo.addItems(self.team_members)
+            current_assignee = asset.get("assignee", "")
+            assignee_combo.setCurrentText(current_assignee)
+            assignee_combo.currentIndexChanged.connect(lambda index, r=row: self.on_assignee_changed(r, index))
+            self.asset_table.setCellWidget(row, 3, assignee_combo)
 
         self.asset_table.resizeColumnsToContents()
 
@@ -378,14 +391,19 @@ class AssetManager(QMainWindow):
         new_status = status_options[index]
         self.assets["assets"][row]["status"] = new_status
         self.save_data()
-        # Cập nhật màu cho ô Status
         self.asset_table.item(row, 2).setBackground(QColor(status_colors[new_status]))
 
-    def on_cell_changed(self, row, col):
-        if col == 3:  # Cột Assignee
-            new_assignee = self.asset_table.item(row, col).text()
-            self.assets["assets"][row]["assignee"] = new_assignee
-            self.save_data()
+    def on_assignee_changed(self, row, index):
+        assignee_combo = self.asset_table.cellWidget(row, 3)
+        new_assignee = assignee_combo.currentText()
+        old_assignee = self.assets["assets"][row].get("assignee", "")
+        self.assets["assets"][row]["assignee"] = new_assignee
+        self.save_data()
+
+        # Hiển thị thông báo nếu người được assign là người đang đăng nhập
+        if new_assignee and new_assignee == self.current_user["username"] and new_assignee != old_assignee:
+            asset_name = self.assets["assets"][row]["name"]
+            QMessageBox.information(self, "Task Assigned", f"You have been assigned to task: {asset_name}")
 
     def show_asset_details(self, item):
         asset_name = item.text()
@@ -432,7 +450,6 @@ class AssetManager(QMainWindow):
                 else:
                     self.open_file_btn.setEnabled(True)
 
-                # Highlight hàng tương ứng trong bảng
                 self.asset_table.clearSelection()
                 self.asset_table.selectRow(row)
                 self.asset_table.setFocus()
@@ -487,8 +504,8 @@ class AssetManager(QMainWindow):
             new_asset = {
                 "name": asset_name,
                 "type": asset_type,
-                "status": "To Do",  # Khởi tạo status mặc định
-                "assignee": "",     # Khởi tạo assignee rỗng
+                "status": "To Do",
+                "assignee": "",
                 "versions": [
                     {
                         "version": "v001",
@@ -533,7 +550,6 @@ class AssetManager(QMainWindow):
                 versions.sort(key=lambda x: x["version"])
 
                 if versions:
-                    # Kiểm tra xem asset đã tồn tại trong self.assets["assets"] chưa
                     existing_asset = next((asset for asset in self.assets["assets"] if asset["name"] == asset_name and asset["type"].lower() == asset_type), None)
                     if existing_asset:
                         new_asset = existing_asset
