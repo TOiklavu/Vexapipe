@@ -1,4 +1,4 @@
-# core/asset_manager.py
+# D:\OneDrive\Desktop\Projects\Vexapipe\App\core\asset_manager.py
 import os
 import json
 import subprocess
@@ -7,32 +7,36 @@ import shutil
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
-                             QTableWidget, QTableWidgetItem, QComboBox, QMessageBox)
+                             QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget)
 from PyQt5.QtGui import QPixmap, QIcon, QColor
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSettings
 from utils.paths import get_project_data_path
 from utils.dialogs import AddAssetDialog
 
 BLENDER_PATH = "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe"
-TEMPLATE_BLEND_FILE = "D:/OneDrive/Desktop/Projects/Vexapipe/template.blend"
-DEFAULT_THUMBNAIL = "D:/OneDrive/Desktop/Projects/Vexapipe/default_thumbnail.jpg"
-USERS_FILE = "D:/OneDrive/Desktop/Projects/Vexapipe/users.json"
+RESOURCES_DIR = "D:/OneDrive/Desktop/Projects/Vexapipe/App/Resources"
+TEMPLATE_BLEND_FILE = os.path.join(RESOURCES_DIR, "template.blend")
+DEFAULT_THUMBNAIL = os.path.join(RESOURCES_DIR, "default_thumbnail.jpg")
+USERS_FILE = "D:/OneDrive/Desktop/Projects/Vexapipe/App/users.json"
 
 class AssetManager(QMainWindow):
     def __init__(self, project_path, show_lobby_callback, current_user):
         super().__init__()
         self.project_path = project_path
         self.show_lobby_callback = show_lobby_callback
-        self.current_user = current_user  # Lưu thông tin người dùng hiện tại
+        self.current_user = current_user
         self.project_name = os.path.basename(project_path)
+        self.icons_dir = os.path.join(RESOURCES_DIR, "ProjectData", self.project_name, "icons")
         self.setWindowTitle(f"Blender Asset Manager - {self.project_name} (Logged in as {self.current_user['username']})")
-        self.setGeometry(100, 100, 800, 600)
+        
+        # Khôi phục vị trí và kích thước cửa sổ
+        self.settings = QSettings("MyCompany", "BlenderAssetManager")
+        self.restoreGeometry(self.settings.value("AssetManager/geometry", b""))
 
         self.data_file = get_project_data_path(project_path)
         self.assets = self.load_data()
         self.project_short = self.assets.get("short", self.project_name)
 
-        # Lấy danh sách người dùng từ users.json
         self.team_members = self.load_team_members()
 
         self.current_file = None
@@ -145,6 +149,11 @@ class AssetManager(QMainWindow):
             }
         """)
 
+    def closeEvent(self, event):
+        # Lưu vị trí và kích thước cửa sổ khi đóng
+        self.settings.setValue("AssetManager/geometry", self.saveGeometry())
+        super().closeEvent(event)
+
     def load_team_members(self):
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, 'r') as f:
@@ -172,7 +181,7 @@ class AssetManager(QMainWindow):
         left_layout = QVBoxLayout(self.left_widget)
         
         home_btn = QPushButton("Home")
-        home_icon_path = os.path.join(self.project_path, "icons/home_icon.png")
+        home_icon_path = os.path.join(self.icons_dir, "home_icon.png")
         if os.path.exists(home_icon_path):
             home_btn.setIcon(QIcon(home_icon_path))
         home_btn.clicked.connect(self.show_lobby_callback)
@@ -184,7 +193,7 @@ class AssetManager(QMainWindow):
             section_btn = QPushButton(asset_type)
             section_btn.setObjectName("sectionButton")
             section_btn.setProperty("asset_type", asset_type)
-            down_arrow_path = os.path.join(self.project_path, "icons/down_arrow.png")
+            down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
             if os.path.exists(down_arrow_path):
                 section_btn.setIcon(QIcon(down_arrow_path))
             else:
@@ -198,14 +207,14 @@ class AssetManager(QMainWindow):
             left_layout.addWidget(asset_list)
 
         add_asset_btn = QPushButton("Add Asset")
-        add_icon_path = os.path.join(self.project_path, "icons/add_icon.png")
+        add_icon_path = os.path.join(self.icons_dir, "add_icon.png")
         if os.path.exists(add_icon_path):
             add_asset_btn.setIcon(QIcon(add_icon_path))
         add_asset_btn.clicked.connect(self.add_asset)
         left_layout.addWidget(add_asset_btn)
 
         refresh_btn = QPushButton("Refresh")
-        refresh_icon_path = os.path.join(self.project_path, "icons/refresh_icon.png")
+        refresh_icon_path = os.path.join(self.icons_dir, "refresh_icon.png")
         if os.path.exists(refresh_icon_path):
             refresh_btn.setIcon(QIcon(refresh_icon_path))
         refresh_btn.clicked.connect(self.refresh_data)
@@ -220,10 +229,10 @@ class AssetManager(QMainWindow):
         self.media_tab = QWidget()
         self.libraries_tab = QWidget()
 
-        scenes_icon_path = os.path.join(self.project_path, "icons/scenes_icon.png")
-        products_icon_path = os.path.join(self.project_path, "icons/products_icon.png")
-        media_icon_path = os.path.join(self.project_path, "icons/media_icon.png")
-        libraries_icon_path = os.path.join(self.project_path, "icons/libraries_icon.png")
+        scenes_icon_path = os.path.join(self.icons_dir, "scenes_icon.png")
+        products_icon_path = os.path.join(self.icons_dir, "products_icon.png")
+        media_icon_path = os.path.join(self.icons_dir, "media_icon.png")
+        libraries_icon_path = os.path.join(self.icons_dir, "libraries_icon.png")
 
         self.tabs.addTab(self.scenes_tab, QIcon(scenes_icon_path) if os.path.exists(scenes_icon_path) else QIcon(), "Scenes")
         self.tabs.addTab(self.products_tab, QIcon(products_icon_path) if os.path.exists(products_icon_path) else QIcon(), "Products")
@@ -235,7 +244,7 @@ class AssetManager(QMainWindow):
         self.asset_table.setColumnCount(4)
         self.asset_table.setHorizontalHeaderLabels(["Asset Name", "Asset Type", "Status", "Assignee"])
         self.asset_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.asset_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Không cho chỉnh sửa trực tiếp
+        self.asset_table.setEditTriggers(QTableWidget.NoEditTriggers)
         scenes_layout.addWidget(self.asset_table)
 
         self.detail_widget = QWidget()
@@ -258,7 +267,7 @@ class AssetManager(QMainWindow):
         detail_layout.addWidget(info_panel)
 
         self.open_file_btn = QPushButton("Open in Blender")
-        blender_icon_path = os.path.join(self.project_path, "icons/blender_icon.png")
+        blender_icon_path = os.path.join(self.icons_dir, "blender_icon.png")
         if os.path.exists(blender_icon_path):
             self.open_file_btn.setIcon(QIcon(blender_icon_path))
         self.open_file_btn.clicked.connect(self.open_in_blender)
@@ -294,13 +303,13 @@ class AssetManager(QMainWindow):
 
         if section_btn:
             if self.section_states[asset_type]:
-                down_arrow_path = os.path.join(self.project_path, "icons/down_arrow.png")
+                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
                 if os.path.exists(down_arrow_path):
                     section_btn.setIcon(QIcon(down_arrow_path))
                 else:
                     section_btn.setText(f"{asset_type} ▼")
             else:
-                right_arrow_path = os.path.join(self.project_path, "icons/right_arrow.png")
+                right_arrow_path = os.path.join(self.icons_dir, "right_arrow.png")
                 if os.path.exists(right_arrow_path):
                     section_btn.setIcon(QIcon(right_arrow_path))
                 else:
@@ -349,17 +358,14 @@ class AssetManager(QMainWindow):
         }
 
         for row, asset in enumerate(self.assets["assets"]):
-            # Cột Asset Name
             name_item = QTableWidgetItem(asset["name"])
             name_item.setFlags(name_item.flags() ^ Qt.ItemIsEditable)
             self.asset_table.setItem(row, 0, name_item)
 
-            # Cột Asset Type
             type_item = QTableWidgetItem(asset["type"])
             type_item.setFlags(type_item.flags() ^ Qt.ItemIsEditable)
             self.asset_table.setItem(row, 1, type_item)
 
-            # Cột Status
             status_combo = QComboBox()
             status_combo.addItems(status_options)
             current_status = asset.get("status", "To Do")
@@ -369,9 +375,8 @@ class AssetManager(QMainWindow):
             self.asset_table.setItem(row, 2, QTableWidgetItem())
             self.asset_table.item(row, 2).setBackground(QColor(status_colors[current_status]))
 
-            # Cột Assignee
             assignee_combo = QComboBox()
-            assignee_combo.addItem("")  # Lựa chọn trống
+            assignee_combo.addItem("")
             assignee_combo.addItems(self.team_members)
             current_assignee = asset.get("assignee", "")
             assignee_combo.setCurrentText(current_assignee)
@@ -403,7 +408,13 @@ class AssetManager(QMainWindow):
         # Hiển thị thông báo nếu người được assign là người đang đăng nhập
         if new_assignee and new_assignee == self.current_user["username"] and new_assignee != old_assignee:
             asset_name = self.assets["assets"][row]["name"]
-            QMessageBox.information(self, "Task Assigned", f"You have been assigned to task: {asset_name}")
+            msg = QMessageBox()
+            msg.setWindowTitle("Task Assigned")
+            msg.setText(f"You have been assigned to task: {asset_name}")
+            msg.setStandardButtons(QMessageBox.Ok)
+            # Đặt pop-up ở giữa màn hình
+            msg.move(QDesktopWidget().availableGeometry().center() - msg.rect().center())
+            msg.exec_()
 
     def show_asset_details(self, item):
         asset_name = item.text()
@@ -411,17 +422,40 @@ class AssetManager(QMainWindow):
             if asset["name"] == asset_name:
                 asset_type = asset.get("type", "Unknown")
                 latest_file = f"{self.project_short}_{asset_name}.blend"
-                latest_version = "v000"
                 latest_file_path = os.path.join(self.project_path, f"assets/{asset_type.lower()}/{asset_name}/{self.project_short}_{asset_name}.blend")
+                
+                # Xác định phiên bản
+                asset_dir = os.path.join(self.project_path, f"assets/{asset_type.lower()}/{asset_name}")
+                old_dir = os.path.join(asset_dir, ".old")
+                latest_version = "v001"  # Mặc định là v001
+
+                if os.path.exists(old_dir):
+                    # Liệt kê các file trong thư mục .old
+                    old_files = [f for f in os.listdir(old_dir) if os.path.isfile(os.path.join(old_dir, f))]
+                    # Tìm các file có định dạng <project_short>_<asset_name>_vXXX.blend
+                    version_files = [f for f in old_files if f.startswith(f"{self.project_short}_{asset_name}_v") and f.endswith(".blend")]
+                    if version_files:
+                        # Lấy số phiên bản từ tên file (ví dụ: v001 -> 001)
+                        versions = []
+                        for f in version_files:
+                            try:
+                                version_str = f.replace(f"{self.project_short}_{asset_name}_v", "").replace(".blend", "")
+                                version_num = int(version_str)
+                                versions.append(version_num)
+                            except ValueError:
+                                continue
+                        if versions:
+                            # Tìm phiên bản cao nhất và tăng lên 1
+                            max_version = max(versions)
+                            latest_version = f"v{max_version + 1:03d}"  # Ví dụ: 2 -> v003
+
                 created_time = "Unknown"
                 if os.path.exists(latest_file_path):
                     created_time = datetime.fromtimestamp(os.path.getctime(latest_file_path)).strftime("%Y-%m-%d %H:%M:%S")
 
                 self.description_label.setText(
                     f"Scene: {latest_file}\n"
-                    f"Name: {asset_name}\n"
                     f"Version: {latest_version}\n"
-                    f"Note: \n"
                     f"Created: {created_time}"
                 )
 
@@ -442,9 +476,7 @@ class AssetManager(QMainWindow):
                     self.open_file_btn.setEnabled(False)
                     self.description_label.setText(
                         f"Scene: {latest_file}\n"
-                        f"Name: {asset_name}\n"
                         f"Version: {latest_version}\n"
-                        f"Note: \n"
                         f"Created: {created_time} (File not found)"
                     )
                 else:
@@ -474,6 +506,8 @@ class AssetManager(QMainWindow):
 
     def add_asset(self):
         dialog = AddAssetDialog(self)
+        # Đặt dialog ở giữa màn hình
+        dialog.move(QDesktopWidget().availableGeometry().center() - dialog.rect().center())
         if dialog.exec_():
             asset_type, asset_name = dialog.get_data()
             if not asset_name:

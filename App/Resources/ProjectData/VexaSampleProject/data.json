@@ -1,0 +1,52 @@
+{
+    "assets": [
+        {
+            "name": "DienThoai",
+            "type": "Props",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "assets/props/DienThoai/VSP_DienThoai.blend",
+                    "thumbnail": "assets/props/DienThoai/thumbnail.jpg"
+                }
+            ]
+        },
+        {
+            "name": "Vuna",
+            "type": "Characters",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "assets/characters/Vuna/VSP_Vuna.blend",
+                    "thumbnail": "assets/characters/Vuna/thumbnail.jpg"
+                }
+            ]
+        },
+        {
+            "name": "1",
+            "type": "Characters",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "assets/characters/1/VSP_1.blend",
+                    "thumbnail": "assets/characters/1/thumbnail.jpg"
+                }
+            ]
+        }
+    ],
+    "section_states": {
+        "Characters": true,
+        "Props": true,
+        "VFXs": true
+    },
+    "short": "VSP"
+}
