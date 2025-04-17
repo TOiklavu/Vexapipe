@@ -1,16 +1,16 @@
 {
     "assets": [
         {
-            "name": "DienThoai",
-            "type": "Props",
+            "name": "1",
+            "type": "Characters",
             "status": "To Do",
             "assignee": "",
             "versions": [
                 {
                     "version": "v001",
-                    "description": "Initial version",
-                    "file_path": "assets/props/DienThoai/VSP_DienThoai.blend",
-                    "thumbnail": "assets/props/DienThoai/thumbnail.jpg"
+                    "description": "Auto-refreshed version",
+                    "file_path": "assets/characters/1/VSP_1.blend",
+                    "thumbnail": "assets/characters/1/thumbnail.jpg"
                 }
             ]
         },
@@ -22,23 +22,37 @@
             "versions": [
                 {
                     "version": "v001",
-                    "description": "Initial version",
+                    "description": "Auto-refreshed version",
                     "file_path": "assets/characters/Vuna/VSP_Vuna.blend",
                     "thumbnail": "assets/characters/Vuna/thumbnail.jpg"
                 }
             ]
         },
         {
-            "name": "1",
-            "type": "Characters",
+            "name": "DienThoai",
+            "type": "Props",
             "status": "To Do",
             "assignee": "",
             "versions": [
                 {
                     "version": "v001",
-                    "description": "Initial version",
-                    "file_path": "assets/characters/1/VSP_1.blend",
-                    "thumbnail": "assets/characters/1/thumbnail.jpg"
+                    "description": "Auto-refreshed version",
+                    "file_path": "assets/props/DienThoai/VSP_DienThoai.blend",
+                    "thumbnail": "assets/props/DienThoai/thumbnail.jpg"
+                }
+            ]
+        },
+        {
+            "name": "Khoi lua",
+            "type": "Vfxs",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Auto-refreshed version",
+                    "file_path": "assets/vfxs/Khoi lua/VSP_Khoi lua.blend",
+                    "thumbnail": "assets/vfxs/Khoi lua/thumbnail.jpg"
                 }
             ]
         }
@@ -48,5 +62,28 @@
         "Props": true,
         "VFXs": true
     },
-    "short": "VSP"
+    "short": "VSP",
+    "shots": [
+        {
+            "name": "VSP_001",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "sequencer/VSP_001/VSP_001.blend"
+                }
+            ]
+        },
+        {
+            "name": "VSP_002",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "sequencer/VSP_002/VSP_002.blend"
+                }
+            ]
+        }
+    ],
+    "shot_section_state": true
 }
