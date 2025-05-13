@@ -1,5 +1,5 @@
 # D:\OneDrive\Desktop\Projects\Vexapipe\App\utils\dialogs.py
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QComboBox, QPushButton, QLabel
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit, QComboBox, QPushButton, QHBoxLayout)
 from .add_shot_dialog import AddShotDialog
 
 class AddProjectDialog(QDialog):
@@ -35,39 +35,53 @@ class AddProjectDialog(QDialog):
     def get_data(self):
         return self.name_input.text().strip(), self.short_input.text().strip()
 
+    
 class AddAssetDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add New Asset")
-        self.setFixedSize(300, 200)
+        self.setModal(True)
 
         layout = QVBoxLayout()
 
-        self.type_label = QLabel("Asset Type:")
-        layout.addWidget(self.type_label)
+        # Asset Type
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(QLabel("Asset Type:"))
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["Characters", "Props", "VFXs"])
+        type_layout.addWidget(self.type_combo)
+        layout.addLayout(type_layout)
 
-        self.type_input = QComboBox()
-        self.type_input.addItems(["Characters", "Props", "VFXs"])
-        layout.addWidget(self.type_input)
+        # Asset Name
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("Asset Name:"))
+        self.name_edit = QLineEdit()
+        name_layout.addWidget(self.name_edit)
+        layout.addLayout(name_layout)
 
-        self.name_label = QLabel("Asset Name:")
-        layout.addWidget(self.name_label)
+        # Stage
+        stage_layout = QHBoxLayout()
+        stage_layout.addWidget(QLabel("Stage:"))
+        self.stage_combo = QComboBox()
+        self.stage_combo.addItems(["Modeling", "Texturing", "Rigging"])
+        stage_layout.addWidget(self.stage_combo)
+        layout.addLayout(stage_layout)
 
-        self.name_input = QLineEdit()
-        layout.addWidget(self.name_input)
+        # Buttons
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton("OK")
+        cancel_button = QPushButton("Cancel")
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
 
-        self.add_btn = QPushButton("Add")
-        self.add_btn.clicked.connect(self.accept)
-        layout.addWidget(self.add_btn)
-
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.clicked.connect(self.reject)
-        layout.addWidget(self.cancel_btn)
+        ok_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
 
         self.setLayout(layout)
 
     def get_data(self):
-        return self.type_input.currentText(), self.name_input.text().strip()
+        return (self.type_combo.currentText(), self.name_edit.text(), self.stage_combo.currentText())
 
 class LoginDialog(QDialog):
     def __init__(self, users, parent=None):

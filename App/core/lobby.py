@@ -9,8 +9,9 @@ from utils.paths import resource_path
 from core.asset_manager import AssetManager
 
 class Lobby(QMainWindow):
-    def __init__(self):
+    def __init__(self, current_user):
         super().__init__()
+        self.current_user = current_user
         self.setWindowTitle("Project Lobby")
         self.setGeometry(100, 100, 800, 600)
 
@@ -182,7 +183,7 @@ class Lobby(QMainWindow):
         if self.current_project_window:
             self.current_project_window.close()
 
-        self.current_project_window = AssetManager(project_path, self.show_lobby)
+        self.current_project_window = AssetManager(project_path, self.show_lobby, self.current_user)
         self.current_project_window.show()
         self.hide()
 

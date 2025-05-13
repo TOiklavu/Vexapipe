@@ -1,0 +1,55 @@
+{
+    "assets": [
+        {
+            "name": "Vuna",
+            "type": "Characters",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "03_Production/assets/characters/Vuna/MCT_Vuna.blend",
+                    "thumbnail": "03_Production/assets/characters/Vuna/thumbnail.jpg"
+                }
+            ]
+        },
+        {
+            "name": "DienThoai",
+            "type": "Characters",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "03_Production/assets/characters/DienThoai/MCT_DienThoai.blend",
+                    "thumbnail": "03_Production/assets/characters/DienThoai/thumbnail.jpg"
+                }
+            ]
+        },
+        {
+            "name": "Ngu",
+            "type": "Characters",
+            "stage": "Modeling",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "03_Production/assets/characters/Ngu/scenefiles/MCT_Ngu_Modeling.blend",
+                    "thumbnail": "03_Production/assets/characters/Ngu/thumbnail.jpg"
+                }
+            ]
+        }
+    ],
+    "section_states": {
+        "Characters": true,
+        "Props": true,
+        "VFXs": true
+    },
+    "short": "MCT",
+    "shots": [],
+    "shot_section_state": true
+}

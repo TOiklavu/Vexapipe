@@ -6,6 +6,7 @@ import shutil
 import glob
 import re
 import cv2
+import sip
 import numpy as np
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -34,6 +35,9 @@ class AssetManager(QMainWindow):
         self.project_name = os.path.basename(project_path)
         self.icons_dir = os.path.join(RESOURCES_DIR, "ProjectData", self.project_name, "icons")
         self.setWindowTitle(f"Blender Asset Manager - {self.project_name} (Logged in as {self.current_user['username']})")
+        
+        # Tạo cấu trúc thư mục ban đầu cho dự án
+        self._create_initial_structure()
         
         self.settings = QSettings("MyCompany", "BlenderAssetManager")
         self.restoreGeometry(self.settings.value("AssetManager/geometry", b""))
@@ -180,10 +184,34 @@ class AssetManager(QMainWindow):
             }
         """)
 
+    def _create_initial_structure(self):
+        """Tạo cấu trúc thư mục ban đầu cho dự án."""
+        folders = [
+            "00_Pipeline",
+            "01_Management",
+            "02_Designs",
+            "03_Production",
+            "04_Resources"
+        ]
+        for folder in folders:
+            folder_path = os.path.join(self.project_path, folder)
+            os.makedirs(folder_path, exist_ok=True)
+
     def closeEvent(self, event):
-        # Xóa file video tạm thời khi đóng ứng dụng
+        # Dừng và giải phóng QMediaPlayer
+        if self.media_player:
+            self.media_player.stop()
+            self.media_player.setMedia(QMediaContent())  # Xóa media để giải phóng file
+            self.media_player.setVideoOutput(None)  # Ngắt kết nối video output
+
+        # Xóa file video tạm thời
         if os.path.exists(TEMP_VIDEO_PATH):
-            os.remove(TEMP_VIDEO_PATH)
+            try:
+                os.remove(TEMP_VIDEO_PATH)
+            except PermissionError:
+                # Nếu không xóa được, ghi log hoặc bỏ qua
+                self.status_label.setText(f"Warning: Could not delete {TEMP_VIDEO_PATH}. File in use.")
+        
         self.settings.setValue("AssetManager/geometry", self.saveGeometry())
         super().closeEvent(event)
 
@@ -263,25 +291,32 @@ class AssetManager(QMainWindow):
         self.products_tab = QWidget()
         self.media_tab = QWidget()
         self.libraries_tab = QWidget()
+        self.tasks_tab = QWidget()
 
         scenes_icon_path = os.path.join(self.icons_dir, "scenes_icon.png")
         products_icon_path = os.path.join(self.icons_dir, "products_icon.png")
         media_icon_path = os.path.join(self.icons_dir, "media_icon.png")
         libraries_icon_path = os.path.join(self.icons_dir, "libraries_icon.png")
+        tasks_icon_path = os.path.join(self.icons_dir, "tasks_icon.png")
 
         self.tabs.addTab(self.scenes_tab, QIcon(scenes_icon_path) if os.path.exists(scenes_icon_path) else QIcon(), "Scenes")
         self.tabs.addTab(self.products_tab, QIcon(products_icon_path) if os.path.exists(products_icon_path) else QIcon(), "Products")
         self.tabs.addTab(self.media_tab, QIcon(media_icon_path) if os.path.exists(media_icon_path) else QIcon(), "Media")
         self.tabs.addTab(self.libraries_tab, QIcon(libraries_icon_path) if os.path.exists(libraries_icon_path) else QIcon(), "Libraries")
+        self.tabs.addTab(self.tasks_tab, QIcon(tasks_icon_path) if os.path.exists(tasks_icon_path) else QIcon(), "Tasks")
 
-        # Tab Scenes
+        # Tab Scenes (trống)
         scenes_layout = QVBoxLayout(self.scenes_tab)
+        scenes_layout.addStretch()
+
+        # Tab Tasks (chứa asset_table)
+        tasks_layout = QVBoxLayout(self.tasks_tab)
         self.asset_table = QTableWidget()
-        self.asset_table.setColumnCount(4)
-        self.asset_table.setHorizontalHeaderLabels(["Asset Name", "Asset Type", "Status", "Assignee"])
+        self.asset_table.setColumnCount(5)  # Thêm cột Stage
+        self.asset_table.setHorizontalHeaderLabels(["Asset Name", "Asset Type", "Stage", "Status", "Assignee"])
         self.asset_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.asset_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        scenes_layout.addWidget(self.asset_table)
+        tasks_layout.addWidget(self.asset_table)
 
         # Tab Media
         media_layout = QVBoxLayout(self.media_tab)
@@ -365,30 +400,43 @@ class AssetManager(QMainWindow):
             self.assets_btn.setStyleSheet("QPushButton#modeButton { background-color: #3c3f41; }")
             self.shots_btn.setStyleSheet("QPushButton#modeButton { background-color: #4a90e2; }")
 
+        # Xóa tất cả các widget trong content_layout hiện tại
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
             widget = item.widget()
             if widget:
-                widget.deleteLater()
+                widget.setParent(None)  # Ngắt kết nối widget khỏi layout
             del item
 
         if mode == "Assets":
             for asset_type in ["Characters", "Props", "VFXs"]:
-                section_btn = QPushButton(asset_type)
-                section_btn.setObjectName("sectionButton")
-                section_btn.setProperty("asset_type", asset_type)
-                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-                if os.path.exists(down_arrow_path):
-                    section_btn.setIcon(QIcon(down_arrow_path))
-                else:
-                    section_btn.setText(f"{asset_type} ▼")
-                section_btn.clicked.connect(lambda checked, at=asset_type: self.toggle_section(at))
-                self.content_layout.addWidget(section_btn)
+                if self.asset_lists[asset_type] is None:
+                    # Tạo mới section button và list widget
+                    section_btn = QPushButton(asset_type)
+                    section_btn.setObjectName("sectionButton")
+                    section_btn.setProperty("asset_type", asset_type)
+                    down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
+                    if os.path.exists(down_arrow_path):
+                        section_btn.setIcon(QIcon(down_arrow_path))
+                    else:
+                        section_btn.setText(f"{asset_type} ▼")
+                    section_btn.clicked.connect(lambda checked, at=asset_type: self.toggle_section(at))
+                    self.content_layout.addWidget(section_btn)
 
-                asset_list = QListWidget()
-                asset_list.itemClicked.connect(self.show_asset_details)
-                self.asset_lists[asset_type] = asset_list
-                self.content_layout.addWidget(asset_list)
+                    asset_list = QListWidget()
+                    asset_list.itemClicked.connect(self.show_asset_details)
+                    self.asset_lists[asset_type] = asset_list
+                    self.content_layout.addWidget(asset_list)
+                else:
+                    # Thêm lại section button và list widget
+                    section_btn = None
+                    for btn in self.content_widget.findChildren(QPushButton):
+                        if btn.property("asset_type") == asset_type:
+                            section_btn = btn
+                            break
+                    if section_btn:
+                        self.content_layout.addWidget(section_btn)
+                    self.content_layout.addWidget(self.asset_lists[asset_type])
 
             add_asset_btn = QPushButton("Add Asset")
             add_icon_path = os.path.join(self.icons_dir, "add_icon.png")
@@ -399,28 +447,47 @@ class AssetManager(QMainWindow):
 
             self.load_data_ui()
         else:
-            shot_section_btn = QPushButton("Shots")
-            shot_section_btn.setObjectName("sectionButton")
-            down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-            if os.path.exists(down_arrow_path):
-                shot_section_btn.setIcon(QIcon(down_arrow_path))
+            if self.shot_list is None:
+                # Tạo mới shot section button và list widget
+                shot_section_btn = QPushButton("Shots")
+                shot_section_btn.setObjectName("sectionButton")
+                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
+                if os.path.exists(down_arrow_path):
+                    shot_section_btn.setIcon(QIcon(down_arrow_path))
+                else:
+                    shot_section_btn.setText("Shots ▼")
+                shot_section_btn.clicked.connect(self.toggle_shot_section)
+                self.content_layout.addWidget(shot_section_btn)
+
+                self.shot_list = QListWidget()
+                self.shot_list.itemClicked.connect(self.show_shot_details)
+                self.shot_list.setViewMode(QListWidget.ListMode)
+                self.shot_list.setSpacing(5)
+                self.content_layout.addWidget(self.shot_list)
+
+                add_shot_btn = QPushButton("Add Shot")
+                add_icon_path = os.path.join(self.icons_dir, "add_icon.png")
+                if os.path.exists(add_icon_path):
+                    add_shot_btn.setIcon(QIcon(add_icon_path))
+                add_shot_btn.clicked.connect(self.add_shot)
+                self.content_layout.addWidget(add_shot_btn)
             else:
-                shot_section_btn.setText("Shots ▼")
-            shot_section_btn.clicked.connect(self.toggle_shot_section)
-            self.content_layout.addWidget(shot_section_btn)
+                # Thêm lại shot section button và list widget
+                shot_section_btn = None
+                for btn in self.content_widget.findChildren(QPushButton):
+                    if btn.text().startswith("Shots"):
+                        shot_section_btn = btn
+                        break
+                if shot_section_btn:
+                    self.content_layout.addWidget(shot_section_btn)
+                self.content_layout.addWidget(self.shot_list)
 
-            self.shot_list = QListWidget()
-            self.shot_list.itemClicked.connect(self.show_shot_details)
-            self.shot_list.setViewMode(QListWidget.ListMode)
-            self.shot_list.setSpacing(5)
-            self.content_layout.addWidget(self.shot_list)
-
-            add_shot_btn = QPushButton("Add Shot")
-            add_icon_path = os.path.join(self.icons_dir, "add_icon.png")
-            if os.path.exists(add_icon_path):
-                add_shot_btn.setIcon(QIcon(add_icon_path))
-            add_shot_btn.clicked.connect(self.add_shot)
-            self.content_layout.addWidget(add_shot_btn)
+                add_shot_btn = QPushButton("Add Shot")
+                add_icon_path = os.path.join(self.icons_dir, "add_icon.png")
+                if os.path.exists(add_icon_path):
+                    add_shot_btn.setIcon(QIcon(add_icon_path))
+                add_shot_btn.clicked.connect(self.add_shot)
+                self.content_layout.addWidget(add_shot_btn)
 
             self.load_data_ui()
 
@@ -575,14 +642,18 @@ class AssetManager(QMainWindow):
             type_item.setFlags(type_item.flags() ^ Qt.ItemIsEditable)
             self.asset_table.setItem(row, 1, type_item)
 
+            stage_item = QTableWidgetItem(asset.get("stage", "Modeling"))  # Giá trị mặc định là Modeling
+            stage_item.setFlags(stage_item.flags() ^ Qt.ItemIsEditable)
+            self.asset_table.setItem(row, 2, stage_item)
+
             status_combo = QComboBox()
             status_combo.addItems(status_options)
             current_status = asset.get("status", "To Do")
             status_combo.setCurrentText(current_status)
             status_combo.currentIndexChanged.connect(lambda index, r=row: self.on_status_changed(r, index))
-            self.asset_table.setCellWidget(row, 2, status_combo)
-            self.asset_table.setItem(row, 2, QTableWidgetItem())
-            self.asset_table.item(row, 2).setBackground(QColor(status_colors[current_status]))
+            self.asset_table.setCellWidget(row, 3, status_combo)
+            self.asset_table.setItem(row, 3, QTableWidgetItem())
+            self.asset_table.item(row, 3).setBackground(QColor(status_colors[current_status]))
 
             assignee_combo = QComboBox()
             assignee_combo.addItem("")
@@ -590,7 +661,7 @@ class AssetManager(QMainWindow):
             current_assignee = asset.get("assignee", "")
             assignee_combo.setCurrentText(current_assignee)
             assignee_combo.currentIndexChanged.connect(lambda index, r=row: self.on_assignee_changed(r, index))
-            self.asset_table.setCellWidget(row, 3, assignee_combo)
+            self.asset_table.setCellWidget(row, 4, assignee_combo)
 
         self.asset_table.resizeColumnsToContents()
 
@@ -605,10 +676,10 @@ class AssetManager(QMainWindow):
         new_status = status_options[index]
         self.assets[row]["status"] = new_status
         self.save_data()
-        self.asset_table.item(row, 2).setBackground(QColor(status_colors[new_status]))
+        self.asset_table.item(row, 3).setBackground(QColor(status_colors[new_status]))
 
     def on_assignee_changed(self, row, index):
-        assignee_combo = self.asset_table.cellWidget(row, 3)
+        assignee_combo = self.asset_table.cellWidget(row, 4)
         new_assignee = assignee_combo.currentText()
         old_assignee = self.assets[row].get("assignee", "")
         self.assets[row]["assignee"] = new_assignee
@@ -674,25 +745,35 @@ class AssetManager(QMainWindow):
 
     def update_media_player(self):
         if not self.current_playblast_dir:
-            self.media_player.stop()
+            if self.media_player:
+                self.media_player.stop()
             return
 
         playblast_dir = os.path.join(self.current_playblast_dir, "playblast")
-        # Tạo thư mục playblast nếu chưa tồn tại
         if not os.path.exists(playblast_dir):
             try:
                 os.makedirs(playblast_dir, exist_ok=True)
                 self.status_label.setText(f"Created playblast directory at {playblast_dir}. Please add frame images (e.g., v1_0001.png).")
-                self.media_player.stop()
+                if self.media_player:
+                    self.media_player.stop()
                 return
             except Exception as e:
                 self.status_label.setText(f"Failed to create playblast directory: {str(e)}")
-                self.media_player.stop()
+                if self.media_player:
+                    self.media_player.stop()
                 return
 
-        # Xóa file video tạm thời cũ nếu tồn tại
+        # Dừng media player và xóa file cũ
+        if self.media_player:
+            self.media_player.stop()
+            self.media_player.setMedia(QMediaContent())  # Giải phóng file cũ
+
         if os.path.exists(TEMP_VIDEO_PATH):
-            os.remove(TEMP_VIDEO_PATH)
+            try:
+                os.remove(TEMP_VIDEO_PATH)
+            except PermissionError:
+                self.status_label.setText(f"Warning: Could not delete old {TEMP_VIDEO_PATH}. File in use.")
+                return
 
         # Tạo video từ chuỗi ảnh
         if self.create_video_from_frames(playblast_dir):
@@ -703,25 +784,29 @@ class AssetManager(QMainWindow):
             self.status_label.setText(f"No valid frames found in {playblast_dir}. Expected format: <prefix>_<number>.(png|jpg), e.g., v1_0001.png")
 
     def show_asset_details(self, item):
+        if not item:
+            return
         asset_name = item.text()
         for row, asset in enumerate(self.assets):
             if asset["name"] == asset_name:
                 asset_type = asset.get("type", "Unknown")
-                latest_file = f"{self.project_short}_{asset_name}.blend"
-                latest_file_path = os.path.join(self.project_path, f"assets/{asset_type.lower()}/{asset_name}/{self.project_short}_{asset_name}.blend")
+                stage = asset.get("stage", "Modeling")
+                latest_file = f"{self.project_short}_{asset_name}_{stage}.blend"
+                latest_file_path = os.path.join(self.project_path, f"03_Production/assets/{asset_type.lower()}/{asset_name}/scenefiles/{latest_file}")
                 
-                asset_dir = os.path.join(self.project_path, f"assets/{asset_type.lower()}/{asset_name}")
-                old_dir = os.path.join(asset_dir, ".old")
+                asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type.lower()}/{asset_name}")
+                scenefiles_dir = os.path.join(asset_dir, "scenefiles")
+                old_dir = os.path.join(scenefiles_dir, ".old")
                 latest_version = "v001"
 
                 if os.path.exists(old_dir):
                     old_files = [f for f in os.listdir(old_dir) if os.path.isfile(os.path.join(old_dir, f))]
-                    version_files = [f for f in old_files if f.startswith(f"{self.project_short}_{asset_name}_v") and f.endswith(".blend")]
+                    version_files = [f for f in old_files if f.startswith(f"{self.project_short}_{asset_name}_{stage}_v") and f.endswith(".blend")]
                     if version_files:
                         versions = []
                         for f in version_files:
                             try:
-                                version_str = f.replace(f"{self.project_short}_{asset_name}_v", "").replace(".blend", "")
+                                version_str = f.replace(f"{self.project_short}_{asset_name}_{stage}_v", "").replace(".blend", "")
                                 version_num = int(version_str)
                                 versions.append(version_num)
                             except ValueError:
@@ -740,7 +825,7 @@ class AssetManager(QMainWindow):
                     f"Created: {created_time}"
                 )
 
-                self.current_thumbnail = os.path.join(self.project_path, f"assets/{asset_type.lower()}/{asset_name}/thumbnail.jpg")
+                self.current_thumbnail = os.path.join(asset_dir, "thumbnail.jpg")
                 if self.current_thumbnail and os.path.exists(self.current_thumbnail):
                     pixmap = QPixmap(self.current_thumbnail)
                     if not pixmap.isNull():
@@ -766,21 +851,37 @@ class AssetManager(QMainWindow):
                 self.current_playblast_dir = asset_dir
                 self.update_media_player()
 
-                self.asset_table.clearSelection()
-                if self.shot_list:
-                    self.shot_list.clearSelection()
-                self.asset_table.selectRow(row)
-                self.asset_table.setFocus()
+                if self.asset_table and isinstance(self.asset_table, QTableWidget):
+                    try:
+                        if not sip.isdeleted(self.asset_table):
+                            self.asset_table.clearSelection()
+                    except SystemError:
+                        pass
+                if self.shot_list and isinstance(self.shot_list, QListWidget):
+                    try:
+                        if not sip.isdeleted(self.shot_list):
+                            self.shot_list.clearSelection()
+                    except SystemError:
+                        pass
+                if self.asset_table and isinstance(self.asset_table, QTableWidget):
+                    try:
+                        if not sip.isdeleted(self.asset_table):
+                            self.asset_table.selectRow(row)
+                            self.asset_table.setFocus()
+                    except SystemError:
+                        pass
                 break
 
     def show_shot_details(self, item):
+        if not item:
+            return
         shot_name = item.text()
         for shot in self.shots:
             if shot["name"] == shot_name:
                 latest_file = f"{shot_name}.blend"
-                latest_file_path = os.path.join(self.project_path, f"sequencer/{shot_name}/{shot_name}.blend")
+                latest_file_path = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}/{shot_name}.blend")
                 
-                shot_dir = os.path.join(self.project_path, f"sequencer/{shot_name}")
+                shot_dir = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
                 old_dir = os.path.join(shot_dir, ".old")
                 latest_version = "v001"
 
@@ -827,7 +928,12 @@ class AssetManager(QMainWindow):
                 self.current_playblast_dir = shot_dir
                 self.update_media_player()
 
-                self.asset_table.clearSelection()
+                if self.asset_table and isinstance(self.asset_table, QTableWidget):
+                    try:
+                        if not sip.isdeleted(self.asset_table):
+                            self.asset_table.clearSelection()
+                    except SystemError:
+                        pass
                 break
 
     def open_in_blender(self, event=None):
@@ -851,21 +957,25 @@ class AssetManager(QMainWindow):
         dialog = AddAssetDialog(self)
         dialog.move(QDesktopWidget().availableGeometry().center() - dialog.rect().center())
         if dialog.exec_():
-            asset_type, asset_name = dialog.get_data()
+            asset_type, asset_name, stage = dialog.get_data()  # Cập nhật để lấy stage
             if not asset_name:
                 self.status_label.setText("Asset name cannot be empty!")
                 return
 
             asset_type_lower = asset_type.lower()
-            asset_dir = os.path.join(self.project_path, f"assets/{asset_type_lower}/{asset_name}")
+            asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type_lower}/{asset_name}")
+            scenefiles_dir = os.path.join(asset_dir, "scenefiles")
             textures_dir = os.path.join(asset_dir, "textures")
             outputs_dir = os.path.join(asset_dir, "outputs")
-            latest_file = os.path.join(asset_dir, f"{self.project_short}_{asset_name}.blend")
+            old_dir = os.path.join(scenefiles_dir, ".old")
+            latest_file = os.path.join(scenefiles_dir, f"{self.project_short}_{asset_name}_{stage}.blend")
 
             try:
                 os.makedirs(asset_dir, exist_ok=True)
+                os.makedirs(scenefiles_dir, exist_ok=True)
                 os.makedirs(textures_dir, exist_ok=True)
                 os.makedirs(outputs_dir, exist_ok=True)
+                os.makedirs(old_dir, exist_ok=True)
 
                 if not os.path.exists(latest_file):
                     if os.path.exists(TEMPLATE_BLEND_FILE):
@@ -880,21 +990,22 @@ class AssetManager(QMainWindow):
             new_asset = {
                 "name": asset_name,
                 "type": asset_type,
+                "stage": stage,  # Thêm trường stage
                 "status": "To Do",
                 "assignee": "",
                 "versions": [
                     {
                         "version": "v001",
                         "description": "Initial version",
-                        "file_path": f"assets/{asset_type_lower}/{asset_name}/{self.project_short}_{asset_name}.blend",
-                        "thumbnail": f"assets/{asset_type_lower}/{asset_name}/thumbnail.jpg"
+                        "file_path": f"03_Production/assets/{asset_type_lower}/{asset_name}/scenefiles/{self.project_short}_{asset_name}_{stage}.blend",
+                        "thumbnail": f"03_Production/assets/{asset_type_lower}/{asset_name}/thumbnail.jpg"
                     }
                 ]
             }
             self.assets.append(new_asset)
             self.save_data()
             self.load_data_ui()
-            self.status_label.setText(f"Asset '{asset_name}' (Type: {asset_type}) created successfully!")
+            self.status_label.setText(f"Asset '{asset_name}' (Type: {asset_type}, Stage: {stage}) created successfully!")
 
     def add_shot(self):
         dialog = AddShotDialog(self)
@@ -906,15 +1017,15 @@ class AssetManager(QMainWindow):
                 return
 
             full_shot_name = f"{self.project_short}_{shot_name}"
-            shot_dir = os.path.join(self.project_path, f"sequencer/{full_shot_name}")
+            shot_dir = os.path.join(self.project_path, f"03_Production/sequencer/{full_shot_name}")
             old_dir = os.path.join(shot_dir, ".old")
-            playblast_dir = os.path.join(shot_dir, "playblast")  # Thêm thư mục playblast
+            playblast_dir = os.path.join(shot_dir, "playblast")
             latest_file = os.path.join(shot_dir, f"{full_shot_name}.blend")
 
             try:
                 os.makedirs(shot_dir, exist_ok=True)
                 os.makedirs(old_dir, exist_ok=True)
-                os.makedirs(playblast_dir, exist_ok=True)  # Tạo thư mục playblast
+                os.makedirs(playblast_dir, exist_ok=True)
 
                 if not os.path.exists(latest_file):
                     if os.path.exists(TEMPLATE_BLEND_FILE):
@@ -932,7 +1043,7 @@ class AssetManager(QMainWindow):
                     {
                         "version": "v001",
                         "description": "Initial version",
-                        "file_path": f"sequencer/{full_shot_name}/{full_shot_name}.blend"
+                        "file_path": f"03_Production/sequencer/{full_shot_name}/{full_shot_name}.blend"
                     }
                 ]
             }
@@ -942,12 +1053,12 @@ class AssetManager(QMainWindow):
             self.status_label.setText(f"Shot '{full_shot_name}' created successfully!")
 
     def refresh_data(self):
-        assets_dir = os.path.join(self.project_path, "assets")
+        assets_dir = os.path.join(self.project_path, "03_Production", "assets")
         if not os.path.exists(assets_dir):
             self.status_label.setText("Assets directory not found!")
             return
 
-        sequencer_dir = os.path.join(self.project_path, "sequencer")
+        sequencer_dir = os.path.join(self.project_path, "03_Production", "sequencer")
         if not os.path.exists(sequencer_dir):
             self.status_label.setText("Sequencer directory not found!")
             return
@@ -970,20 +1081,26 @@ class AssetManager(QMainWindow):
                 if existing_asset:
                     new_assets.append(existing_asset)
                 else:
-                    versions = [{
-                        "version": "v001",
-                        "description": "Auto-refreshed version",
-                        "file_path": f"assets/{asset_type}/{asset_name}/{self.project_short}_{asset_name}.blend",
-                        "thumbnail": f"assets/{asset_type}/{asset_name}/thumbnail.jpg"
-                    }]
-                    new_asset = {
-                        "name": asset_name,
-                        "type": asset_type.capitalize(),
-                        "status": "To Do",
-                        "assignee": "",
-                        "versions": versions
-                    }
-                    new_assets.append(new_asset)
+                    scenefiles_dir = os.path.join(asset_dir, "scenefiles")
+                    if os.path.exists(scenefiles_dir):
+                        blend_files = [f for f in os.listdir(scenefiles_dir) if f.endswith(".blend")]
+                        if blend_files:
+                            stage = next((s for s in ["Modeling", "Texturing", "Rigging"] if f"{self.project_short}_{asset_name}_{s}.blend" in blend_files), "Modeling")
+                            versions = [{
+                                "version": "v001",
+                                "description": "Auto-refreshed version",
+                                "file_path": f"03_Production/assets/{asset_type}/{asset_name}/scenefiles/{self.project_short}_{asset_name}_{stage}.blend",
+                                "thumbnail": f"03_Production/assets/{asset_type}/{asset_name}/thumbnail.jpg"
+                            }]
+                            new_asset = {
+                                "name": asset_name,
+                                "type": asset_type.capitalize(),
+                                "stage": stage,
+                                "status": "To Do",
+                                "assignee": "",
+                                "versions": versions
+                            }
+                            new_assets.append(new_asset)
 
         for shot_name in os.listdir(sequencer_dir):
             shot_dir = os.path.join(sequencer_dir, shot_name)
@@ -997,7 +1114,7 @@ class AssetManager(QMainWindow):
                 versions = [{
                     "version": "v001",
                     "description": "Auto-refreshed version",
-                    "file_path": f"sequencer/{shot_name}/{shot_name}.blend"
+                    "file_path": f"03_Production/sequencer/{shot_name}/{shot_name}.blend"
                 }]
                 new_shot = {
                     "name": shot_name,
