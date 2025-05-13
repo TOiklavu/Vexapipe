@@ -1,4 +1,3 @@
-# core/lobby.py
 import os
 import json
 import shutil
@@ -103,7 +102,7 @@ class Lobby(QMainWindow):
             if not os.path.exists(data_file):
                 try:
                     with open(data_file, 'w') as f:
-                        json.dump({"assets": []}, f, indent=4)
+                        json.dump({"assets": [], "shots": [], "section_states": {"Characters": True, "Props": True, "VFXs": True}, "shot_section_state": True}, f, indent=4)
                     QMessageBox.information(self, "Info", f"Created missing data.json for project: {project_name}")
                 except Exception as e:
                     QMessageBox.warning(self, "Warning", f"Failed to create data.json for {project_name}: {str(e)}")
@@ -121,7 +120,7 @@ class Lobby(QMainWindow):
                     project_btn.setIcon(QIcon(pixmap))
                     project_btn.setIconSize(QSize(180, 120))
             else:
-                default_icon_path = resource_path("icons/default_project_icon.png")
+                default_icon_path = resource_path("default_icons/default_project_icon.png")
                 if os.path.exists(default_icon_path):
                     project_btn.setIcon(QIcon(default_icon_path))
                     project_btn.setIconSize(QSize(180, 120))
@@ -140,40 +139,41 @@ class Lobby(QMainWindow):
         if not project_found:
             QMessageBox.information(self, "Info", "No existing projects found. Create a new project to start.")
 
-    def create_new_project(self):
-        project_name, ok = QInputDialog.getText(self, "New Project", "Enter project name:")
-        if not ok or not project_name:
-            return
+        def create_new_project(self):
+            project_name, ok = QInputDialog.getText(self, "New Project", "Enter project name:")
+            if not ok or not project_name:
+                return
 
-        project_path = os.path.join(self.projects_dir, project_name)
-        if os.path.exists(project_path):
-            QMessageBox.warning(self, "Error", "Project already exists!")
-            return
+            project_path = os.path.join(self.projects_dir, project_name)
+            if os.path.exists(project_path):
+                QMessageBox.warning(self, "Error", "Project already exists!")
+                return
 
-        try:
-            os.makedirs(project_path)
-            os.makedirs(os.path.join(project_path, "assets/Props"))
-            os.makedirs(os.path.join(project_path, "assets/VFXs"))
-            os.makedirs(os.path.join(project_path, "assets/Characters"))
-            os.makedirs(os.path.join(project_path, "icons"))
+            try:
+                os.makedirs(project_path)
+                os.makedirs(os.path.join(project_path, "assets/Props"))
+                os.makedirs(os.path.join(project_path, "assets/VFXs"))
+                os.makedirs(os.path.join(project_path, "assets/Characters"))
+                os.makedirs(os.path.join(project_path, "sequencer"))
+                os.makedirs(os.path.join(project_path, "icons"))
 
-            with open(os.path.join(project_path, "data.json"), 'w') as f:
-                json.dump({"assets": []}, f, indent=4)
+                with open(os.path.join(project_path, "data.json"), 'w') as f:
+                    json.dump({"assets": [], "shots": [], "section_states": {"Characters": True, "Props": True, "VFXs": True}, "shot_section_state": True}, f, indent=4)
 
-            src_icons = resource_path("icons")
-            dst_icons = os.path.join(project_path, "icons")
-            if os.path.exists(src_icons):
-                for icon in os.listdir(src_icons):
-                    shutil.copy(os.path.join(src_icons, icon), dst_icons)
-            else:
-                QMessageBox.warning(self, "Warning", "Icons directory not found. Please ensure the 'icons' directory exists.")
+                src_icons = resource_path("default_icons")
+                dst_icons = os.path.join(project_path, "icons")
+                if os.path.exists(src_icons):
+                    for icon in os.listdir(src_icons):
+                        shutil.copy(os.path.join(src_icons, icon), dst_icons)
+                else:
+                    QMessageBox.warning(self, "Warning", "Default icons directory not found. Please ensure the 'default_icons' directory exists in Resources.")
 
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to create project: {str(e)}")
-            return
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to create project: {str(e)}")
+                return
 
-        self.load_projects()
-        self.open_project(project_path)
+            self.load_projects()
+            self.open_project(project_path)
 
     def open_project(self, project_path):
         with open(self.last_project_file, 'w') as f:

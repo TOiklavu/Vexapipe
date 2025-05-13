@@ -3,12 +3,18 @@ import json
 import subprocess
 import time
 import shutil
+import glob
+import re
+import cv2
+import numpy as np
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
                              QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget)
+from PyQt5.QtMultimediaWidgets import QVideoWidget
 from PyQt5.QtGui import QPixmap, QIcon, QColor
-from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtCore import Qt, QSettings, QUrl
+from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from utils.paths import get_project_data_path
 from utils.dialogs import AddAssetDialog, AddShotDialog
 
@@ -17,6 +23,7 @@ RESOURCES_DIR = "D:/OneDrive/Desktop/Projects/Vexapipe/App/Resources"
 TEMPLATE_BLEND_FILE = os.path.join(RESOURCES_DIR, "template.blend")
 DEFAULT_THUMBNAIL = os.path.join(RESOURCES_DIR, "default_thumbnail.jpg")
 USERS_FILE = "D:/OneDrive/Desktop/Projects/Vexapipe/App/users.json"
+TEMP_VIDEO_PATH = os.path.join(RESOURCES_DIR, "temp_playblast.mp4")
 
 class AssetManager(QMainWindow):
     def __init__(self, project_path, show_lobby_callback, current_user):
@@ -41,6 +48,7 @@ class AssetManager(QMainWindow):
 
         self.current_file = None
         self.current_thumbnail = None
+        self.current_playblast_dir = None
 
         self.section_states = {
             "Characters": True,
@@ -64,6 +72,9 @@ class AssetManager(QMainWindow):
         self.shots_btn = None
         self.content_widget = None
         self.content_layout = None
+
+        self.media_player = None
+        self.video_widget = None
 
         self.init_ui()
 
@@ -170,6 +181,9 @@ class AssetManager(QMainWindow):
         """)
 
     def closeEvent(self, event):
+        # Xóa file video tạm thời khi đóng ứng dụng
+        if os.path.exists(TEMP_VIDEO_PATH):
+            os.remove(TEMP_VIDEO_PATH)
         self.settings.setValue("AssetManager/geometry", self.saveGeometry())
         super().closeEvent(event)
 
@@ -260,6 +274,7 @@ class AssetManager(QMainWindow):
         self.tabs.addTab(self.media_tab, QIcon(media_icon_path) if os.path.exists(media_icon_path) else QIcon(), "Media")
         self.tabs.addTab(self.libraries_tab, QIcon(libraries_icon_path) if os.path.exists(libraries_icon_path) else QIcon(), "Libraries")
 
+        # Tab Scenes
         scenes_layout = QVBoxLayout(self.scenes_tab)
         self.asset_table = QTableWidget()
         self.asset_table.setColumnCount(4)
@@ -267,6 +282,35 @@ class AssetManager(QMainWindow):
         self.asset_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.asset_table.setEditTriggers(QTableWidget.NoEditTriggers)
         scenes_layout.addWidget(self.asset_table)
+
+        # Tab Media
+        media_layout = QVBoxLayout(self.media_tab)
+        self.video_widget = QVideoWidget()
+        self.video_widget.setMinimumHeight(200)
+        media_layout.addWidget(self.video_widget)
+
+        self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
+        self.media_player.setVideoOutput(self.video_widget)
+
+        # Nút điều khiển media
+        media_controls = QHBoxLayout()
+        play_btn = QPushButton("Play")
+        play_btn.clicked.connect(self.media_player.play)
+        media_controls.addWidget(play_btn)
+
+        pause_btn = QPushButton("Pause")
+        pause_btn.clicked.connect(self.media_player.pause)
+        media_controls.addWidget(pause_btn)
+
+        stop_btn = QPushButton("Stop")
+        stop_btn.clicked.connect(self.media_player.stop)
+        media_controls.addWidget(stop_btn)
+
+        media_layout.addLayout(media_controls)
+
+        # Tab Products và Libraries (trống)
+        products_layout = QVBoxLayout(self.products_tab)
+        libraries_layout = QVBoxLayout(self.libraries_tab)
 
         self.detail_widget = QWidget()
         detail_layout = QVBoxLayout(self.detail_widget)
@@ -579,6 +623,85 @@ class AssetManager(QMainWindow):
             msg.move(QDesktopWidget().availableGeometry().center() - msg.rect().center())
             msg.exec_()
 
+    def create_video_from_frames(self, frames_dir):
+        # Tìm tất cả các file ảnh trong thư mục playblast (hỗ trợ .png và .jpg)
+        image_extensions = ("*.png", "*.jpg")
+        image_files = []
+        for ext in image_extensions:
+            image_files.extend(glob.glob(os.path.join(frames_dir, ext)))
+
+        if not image_files:
+            return False
+
+        # Sử dụng regular expression để nhận diện và sắp xếp các file theo số thứ tự
+        # Mẫu tên file: <prefix>_<số thứ tự>.<extension>
+        # Ví dụ: frame_0001.png, v1_0001.png, v2_0002.jpg, ...
+        def extract_frame_number(filename):
+            # Tìm số thứ tự trong tên file (ví dụ: 0001 trong v1_0001.png)
+            match = re.search(r'_(\d+)\.(png|jpg)$', filename)
+            if match:
+                return int(match.group(1))  # Trả về số thứ tự dưới dạng số nguyên
+            return float('inf')  # Nếu không tìm thấy, xếp cuối danh sách
+
+        # Sắp xếp các file theo số thứ tự
+        image_files = sorted(image_files, key=extract_frame_number)
+
+        # Loại bỏ các file không khớp với mẫu (nếu có)
+        image_files = [f for f in image_files if extract_frame_number(f) != float('inf')]
+
+        if not image_files:
+            return False
+
+        # Đọc ảnh đầu tiên để lấy kích thước
+        frame = cv2.imread(image_files[0])
+        if frame is None:
+            return False
+        height, width, layers = frame.shape
+
+        # Tạo video writer
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter(TEMP_VIDEO_PATH, fourcc, 24.0, (width, height))
+
+        # Ghi từng frame vào video
+        for image_file in image_files:
+            frame = cv2.imread(image_file)
+            if frame is None:
+                continue
+            video_writer.write(frame)
+
+        video_writer.release()
+        return True
+
+    def update_media_player(self):
+        if not self.current_playblast_dir:
+            self.media_player.stop()
+            return
+
+        playblast_dir = os.path.join(self.current_playblast_dir, "playblast")
+        # Tạo thư mục playblast nếu chưa tồn tại
+        if not os.path.exists(playblast_dir):
+            try:
+                os.makedirs(playblast_dir, exist_ok=True)
+                self.status_label.setText(f"Created playblast directory at {playblast_dir}. Please add frame images (e.g., v1_0001.png).")
+                self.media_player.stop()
+                return
+            except Exception as e:
+                self.status_label.setText(f"Failed to create playblast directory: {str(e)}")
+                self.media_player.stop()
+                return
+
+        # Xóa file video tạm thời cũ nếu tồn tại
+        if os.path.exists(TEMP_VIDEO_PATH):
+            os.remove(TEMP_VIDEO_PATH)
+
+        # Tạo video từ chuỗi ảnh
+        if self.create_video_from_frames(playblast_dir):
+            self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(TEMP_VIDEO_PATH)))
+            self.status_label.setText(f"Loaded playblast from {playblast_dir}")
+        else:
+            self.media_player.stop()
+            self.status_label.setText(f"No valid frames found in {playblast_dir}. Expected format: <prefix>_<number>.(png|jpg), e.g., v1_0001.png")
+
     def show_asset_details(self, item):
         asset_name = item.text()
         for row, asset in enumerate(self.assets):
@@ -640,6 +763,9 @@ class AssetManager(QMainWindow):
                 else:
                     self.open_file_btn.setEnabled(True)
 
+                self.current_playblast_dir = asset_dir
+                self.update_media_player()
+
                 self.asset_table.clearSelection()
                 if self.shot_list:
                     self.shot_list.clearSelection()
@@ -697,6 +823,9 @@ class AssetManager(QMainWindow):
                     )
                 else:
                     self.open_file_btn.setEnabled(True)
+
+                self.current_playblast_dir = shot_dir
+                self.update_media_player()
 
                 self.asset_table.clearSelection()
                 break
@@ -779,11 +908,13 @@ class AssetManager(QMainWindow):
             full_shot_name = f"{self.project_short}_{shot_name}"
             shot_dir = os.path.join(self.project_path, f"sequencer/{full_shot_name}")
             old_dir = os.path.join(shot_dir, ".old")
+            playblast_dir = os.path.join(shot_dir, "playblast")  # Thêm thư mục playblast
             latest_file = os.path.join(shot_dir, f"{full_shot_name}.blend")
 
             try:
                 os.makedirs(shot_dir, exist_ok=True)
                 os.makedirs(old_dir, exist_ok=True)
+                os.makedirs(playblast_dir, exist_ok=True)  # Tạo thư mục playblast
 
                 if not os.path.exists(latest_file):
                     if os.path.exists(TEMPLATE_BLEND_FILE):
