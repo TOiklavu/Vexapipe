@@ -1,11 +1,10 @@
 {
     "projects": [
-
         {
-            "name": "MobControl",
-            "short": "MCT",
-            "path": "D:/OneDrive/Desktop/Projects/Vexapipe/Projects\\MobControl",
-            "thumbnail": "D:/OneDrive/Desktop/Projects/Vexapipe/App\\Resources\\ProjectData\\MobControl\\thumbnail.jpg"
+            "name": "VexaSampleProject",
+            "short": "VSP",
+            "path": "D:/OneDrive/Desktop/Projects/Vexapipe/Projects\\VexaSampleProject",
+            "thumbnail": "D:/OneDrive/Desktop/Projects/Vexapipe/App\\Resources\\ProjectData\\VexaSampleProject\\thumbnail.jpg"
         }
     ]
 }

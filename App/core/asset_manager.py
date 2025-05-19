@@ -11,7 +11,7 @@ import numpy as np
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
-                             QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget)
+                             QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget, QHeaderView)
 from PyQt5.QtMultimediaWidgets import QVideoWidget
 from PyQt5.QtGui import QPixmap, QIcon, QColor
 from PyQt5.QtCore import Qt, QSettings, QUrl
@@ -50,8 +50,6 @@ class AssetManager(QMainWindow):
 
         self.team_members = self.load_team_members()
 
-        self.current_file = None
-        self.current_thumbnail = None
         self.current_playblast_dir = None
 
         self.section_states = {
@@ -79,6 +77,8 @@ class AssetManager(QMainWindow):
 
         self.media_player = None
         self.video_widget = None
+
+        self.scene_file_paths = {}  # Để lưu đường dẫn file .blend
 
         self.init_ui()
 
@@ -210,7 +210,7 @@ class AssetManager(QMainWindow):
                 os.remove(TEMP_VIDEO_PATH)
             except PermissionError:
                 # Nếu không xóa được, ghi log hoặc bỏ qua
-                self.status_label.setText(f"Warning: Could not delete {TEMP_VIDEO_PATH}. File in use.")
+                self.status_label.setText(f"Warning: Could not delete {TEMP_VIDEO_PATH}...")
         
         self.settings.setValue("AssetManager/geometry", self.saveGeometry())
         super().closeEvent(event)
@@ -250,6 +250,7 @@ class AssetManager(QMainWindow):
 
         self.left_widget = QWidget()
         left_layout = QVBoxLayout(self.left_widget)
+        self.left_widget.setMinimumWidth(300)
         
         home_btn = QPushButton("Home")
         home_icon_path = os.path.join(self.icons_dir, "home_icon.png")
@@ -285,7 +286,9 @@ class AssetManager(QMainWindow):
 
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
+        right_widget.setMinimumWidth(600)
 
+        # Khởi tạo các tab
         self.tabs = QTabWidget()
         self.scenes_tab = QWidget()
         self.products_tab = QWidget()
@@ -305,18 +308,33 @@ class AssetManager(QMainWindow):
         self.tabs.addTab(self.libraries_tab, QIcon(libraries_icon_path) if os.path.exists(libraries_icon_path) else QIcon(), "Libraries")
         self.tabs.addTab(self.tasks_tab, QIcon(tasks_icon_path) if os.path.exists(tasks_icon_path) else QIcon(), "Tasks")
 
-        # Tab Scenes (trống)
+        # Tab Scenes
         scenes_layout = QVBoxLayout(self.scenes_tab)
-        scenes_layout.addStretch()
+        self.scenes_list = QListWidget()
+        self.scenes_list.setViewMode(QListWidget.ListMode)
+        self.scenes_list.setSpacing(5)
+        scenes_layout.addWidget(self.scenes_list)
+
+        # Kết nối sự kiện double-click để mở file Blender
+        self.scenes_list.itemDoubleClicked.connect(self.open_scene_in_blender)
+
+        # Load danh sách các file .blend từ thư mục scenefiles của tất cả assets
+        self.load_scenes_list()
 
         # Tab Tasks (chứa asset_table)
         tasks_layout = QVBoxLayout(self.tasks_tab)
         self.asset_table = QTableWidget()
-        self.asset_table.setColumnCount(5)  # Thêm cột Stage
+        self.asset_table.setColumnCount(5)
         self.asset_table.setHorizontalHeaderLabels(["Asset Name", "Asset Type", "Stage", "Status", "Assignee"])
         self.asset_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.asset_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.asset_table.setMinimumWidth(500)
+        self.asset_table.setMinimumHeight(300)
         tasks_layout.addWidget(self.asset_table)
+
+        # Đảm bảo kích thước bảng không bị thu nhỏ
+        self.asset_table.horizontalHeader().setStretchLastSection(True)
+        self.asset_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
 
         # Tab Media
         media_layout = QVBoxLayout(self.media_tab)
@@ -347,37 +365,10 @@ class AssetManager(QMainWindow):
         products_layout = QVBoxLayout(self.products_tab)
         libraries_layout = QVBoxLayout(self.libraries_tab)
 
-        self.detail_widget = QWidget()
-        detail_layout = QVBoxLayout(self.detail_widget)
-
-        info_panel = QWidget()
-        info_layout = QHBoxLayout(info_panel)
-
-        self.thumbnail_label = QLabel()
-        self.thumbnail_label.setFixedSize(100, 100)
-        self.thumbnail_label.setAlignment(Qt.AlignCenter)
-        info_layout.addWidget(self.thumbnail_label)
-
-        self.description_label = QLabel("Scene: \nVersion: \nCreated: ")
-        self.description_label.setStyleSheet("QLabel { background-color: #3c3f41; padding: 10px; }")
-        self.description_label.setMouseTracking(True)
-        self.description_label.mouseDoubleClickEvent = self.open_in_blender
-        info_layout.addWidget(self.description_label)
-
-        detail_layout.addWidget(info_panel)
-
-        self.open_file_btn = QPushButton("Open in Blender")
-        blender_icon_path = os.path.join(self.icons_dir, "blender_icon.png")
-        if os.path.exists(blender_icon_path):
-            self.open_file_btn.setIcon(QIcon(blender_icon_path))
-        self.open_file_btn.clicked.connect(self.open_in_blender)
-        detail_layout.addWidget(self.open_file_btn)
-
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("QLabel { background-color: #3c3f41; padding: 5px; color: #aaaaaa; }")
 
         right_layout.addWidget(self.tabs)
-        right_layout.addWidget(self.detail_widget)
         right_layout.addWidget(self.status_label)
 
         main_layout.addWidget(self.left_widget, 1)
@@ -386,9 +377,152 @@ class AssetManager(QMainWindow):
         main_layout.setSpacing(10)
         left_layout.setSpacing(10)
         right_layout.setSpacing(10)
-        detail_layout.setSpacing(10)
 
         self.switch_mode("Assets")
+
+    def load_scenes_list(self):
+        """Quét và hiển thị danh sách các file .blend từ thư mục scenefiles của tất cả assets."""
+        self.scenes_list.clear()  # Xóa danh sách hiện tại
+
+        # Đường dẫn đến thư mục assets
+        assets_base_dir = os.path.join(self.project_path, "03_Production", "assets")
+        asset_types = ["characters", "props", "vfxs"]
+
+        # Dictionary để lưu trữ đường dẫn file .blend tương ứng với tên hiển thị
+        self.scene_file_paths = {}
+
+        for asset_type in asset_types:
+            type_dir = os.path.join(assets_base_dir, asset_type)
+            if not os.path.exists(type_dir):
+                continue
+
+            for asset_name in os.listdir(type_dir):
+                asset_dir = os.path.join(type_dir, asset_name)
+                if not os.path.isdir(asset_dir):
+                    continue
+
+                # Đường dẫn đến thư mục scenefiles
+                scenefiles_dir = os.path.join(asset_dir, "scenefiles")
+                if not os.path.exists(scenefiles_dir):
+                    continue
+
+                # Đường dẫn đến thumbnail
+                thumbnail_path = os.path.join(asset_dir, "thumbnail.jpg")
+
+                # Quét các file .blend trong thư mục scenefiles
+                for file_name in os.listdir(scenefiles_dir):
+                    if file_name.endswith(".blend"):
+                        file_path = os.path.join(scenefiles_dir, file_name)
+                        # Tạo display name
+                        display_name = f"{asset_name} - {file_name}"
+
+                        # Lấy thông tin file
+                        scene_name = file_name
+                        latest_version = "v001"
+                        old_dir = os.path.join(scenefiles_dir, ".old")
+                        if os.path.exists(old_dir):
+                            old_files = [f for f in os.listdir(old_dir) if os.path.isfile(os.path.join(old_dir, f))]
+                            version_files = [f for f in old_files if f.startswith(f"{self.project_short}_{asset_name}_") and f.endswith(".blend")]
+                            if version_files:
+                                versions = []
+                                for f in version_files:
+                                    try:
+                                        version_str = f.split('_v')[-1].replace(".blend", "")
+                                        version_num = int(version_str)
+                                        versions.append(version_num)
+                                    except ValueError:
+                                        continue
+                                if versions:
+                                    max_version = max(versions)
+                                    latest_version = f"v{max_version + 1:03d}"
+
+                        created_time = "Unknown"
+                        if os.path.exists(file_path):
+                            created_time = datetime.fromtimestamp(os.path.getctime(file_path)).strftime("%Y-%m-%d %H:%M:%S")
+
+                        # Tạo custom widget cho item
+                        item_widget = QWidget()
+                        item_layout = QHBoxLayout(item_widget)
+
+                        # Thêm thumbnail
+                        thumbnail_label = QLabel()
+                        thumbnail_label.setFixedSize(50, 50)  # Kích thước nhỏ hơn so với trước (100x100)
+                        if thumbnail_path and os.path.exists(thumbnail_path):
+                            pixmap = QPixmap(thumbnail_path)
+                            if not pixmap.isNull():
+                                thumbnail_label.setPixmap(pixmap.scaled(50, 50, Qt.KeepAspectRatio))
+                            else:
+                                pixmap = QPixmap(DEFAULT_THUMBNAIL)
+                                thumbnail_label.setPixmap(pixmap.scaled(50, 50, Qt.KeepAspectRatio))
+                        else:
+                            pixmap = QPixmap(DEFAULT_THUMBNAIL)
+                            thumbnail_label.setPixmap(pixmap.scaled(50, 50, Qt.KeepAspectRatio))
+                        item_layout.addWidget(thumbnail_label)
+
+                        # Thêm thông tin chi tiết
+                        info_label = QLabel(
+                            f"Scene: {scene_name}\n"
+                            f"Version: {latest_version}\n"
+                            f"Created: {created_time}"
+                        )
+                        info_label.setStyleSheet("QLabel { background-color: #3c3f41; padding: 5px; color: #ffffff; }")
+                        item_layout.addWidget(info_label)
+
+                        # Tạo QListWidgetItem và gán widget
+                        item = QListWidgetItem(self.scenes_list)
+                        item.setSizeHint(item_widget.sizeHint())  # Đặt kích thước item theo widget
+                        self.scenes_list.setItemWidget(item, item_widget)
+
+                        # Lưu display_name vào item để sử dụng khi double-click
+                        item.setData(Qt.UserRole, display_name)
+
+                        # Lưu đường dẫn file .blend để sử dụng khi double-click
+                        self.scene_file_paths[display_name] = file_path
+
+        if self.scenes_list.count() == 0:
+            self.scenes_list.addItem("No Blender files found in scenefiles directories.")
+
+    def open_scene_in_blender(self, item):
+        """Mở file Blender khi double-click vào một item trong danh sách Scenes."""
+        if not item:
+            return
+
+        display_name = item.data(Qt.UserRole)  # Lấy display_name từ item
+        if not display_name or display_name == "No Blender files found in scenefiles directories.":
+            return
+
+        file_path = self.scene_file_paths.get(display_name)
+        if not file_path or not os.path.exists(file_path):
+            message = f"File '{display_name}' not found..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
+            return
+
+        try:
+            with open(file_path, "rb") as f:
+                header = f.read(7)
+                if header != b"BLENDER":
+                    message = f"Error: '{file_path}' is not a valid Blender file..."
+                    if len(message) > 50:
+                        message = message[:47] + "..."
+                    self.status_label.setText(message)
+                    return
+            subprocess.Popen([BLENDER_PATH, file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            message = f"Opened '{os.path.basename(file_path)}' in Blender..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
+        except FileNotFoundError:
+            message = f"Blender executable not found at: {BLENDER_PATH}..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
+        except Exception as e:
+            message = f"Error: {str(e)}..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
 
     def switch_mode(self, mode):
         self.current_mode = mode
@@ -623,6 +757,8 @@ class AssetManager(QMainWindow):
                         shot_section_btn.setText(f"Shots ({shot_count}) ►")
             self.shot_list.setVisible(self.shot_section_state)
 
+        self.load_scenes_list()  # Cập nhật danh sách Scenes
+
     def update_asset_table(self):
         self.asset_table.setRowCount(len(self.assets))
         status_options = ["To Do", "Inprogress", "Pending Review", "Done"]
@@ -642,7 +778,7 @@ class AssetManager(QMainWindow):
             type_item.setFlags(type_item.flags() ^ Qt.ItemIsEditable)
             self.asset_table.setItem(row, 1, type_item)
 
-            stage_item = QTableWidgetItem(asset.get("stage", "Modeling"))  # Giá trị mặc định là Modeling
+            stage_item = QTableWidgetItem(asset.get("stage", "Modeling"))
             stage_item.setFlags(stage_item.flags() ^ Qt.ItemIsEditable)
             self.asset_table.setItem(row, 2, stage_item)
 
@@ -664,6 +800,7 @@ class AssetManager(QMainWindow):
             self.asset_table.setCellWidget(row, 4, assignee_combo)
 
         self.asset_table.resizeColumnsToContents()
+        self.asset_table.resizeRowsToContents()
 
     def on_status_changed(self, row, index):
         status_options = ["To Do", "Inprogress", "Pending Review", "Done"]
@@ -753,12 +890,18 @@ class AssetManager(QMainWindow):
         if not os.path.exists(playblast_dir):
             try:
                 os.makedirs(playblast_dir, exist_ok=True)
-                self.status_label.setText(f"Created playblast directory at {playblast_dir}. Please add frame images (e.g., v1_0001.png).")
+                message = f"Created playblast directory at {playblast_dir}..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.status_label.setText(message)
                 if self.media_player:
                     self.media_player.stop()
                 return
             except Exception as e:
-                self.status_label.setText(f"Failed to create playblast directory: {str(e)}")
+                message = f"Failed to create playblast directory: {str(e)}..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.status_label.setText(message)
                 if self.media_player:
                     self.media_player.stop()
                 return
@@ -772,16 +915,25 @@ class AssetManager(QMainWindow):
             try:
                 os.remove(TEMP_VIDEO_PATH)
             except PermissionError:
-                self.status_label.setText(f"Warning: Could not delete old {TEMP_VIDEO_PATH}. File in use.")
+                message = f"Warning: Could not delete old {TEMP_VIDEO_PATH}..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.status_label.setText(message)
                 return
 
         # Tạo video từ chuỗi ảnh
         if self.create_video_from_frames(playblast_dir):
             self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(TEMP_VIDEO_PATH)))
-            self.status_label.setText(f"Loaded playblast from {playblast_dir}")
+            message = f"Loaded playblast from {playblast_dir}..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
         else:
             self.media_player.stop()
-            self.status_label.setText(f"No valid frames found in {playblast_dir}. Expected format: <prefix>_<number>.(png|jpg), e.g., v1_0001.png")
+            message = f"No valid frames found in {playblast_dir}. Expected format: <prefix>_<number>.(png|jpg), e.g., v1_0001.png..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
 
     def show_asset_details(self, item):
         if not item:
@@ -790,86 +942,10 @@ class AssetManager(QMainWindow):
         for row, asset in enumerate(self.assets):
             if asset["name"] == asset_name:
                 asset_type = asset.get("type", "Unknown")
-                stage = asset.get("stage", "Modeling")
-                latest_file = f"{self.project_short}_{asset_name}_{stage}.blend"
-                latest_file_path = os.path.join(self.project_path, f"03_Production/assets/{asset_type.lower()}/{asset_name}/scenefiles/{latest_file}")
-                
                 asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type.lower()}/{asset_name}")
-                scenefiles_dir = os.path.join(asset_dir, "scenefiles")
-                old_dir = os.path.join(scenefiles_dir, ".old")
-                latest_version = "v001"
-
-                if os.path.exists(old_dir):
-                    old_files = [f for f in os.listdir(old_dir) if os.path.isfile(os.path.join(old_dir, f))]
-                    version_files = [f for f in old_files if f.startswith(f"{self.project_short}_{asset_name}_{stage}_v") and f.endswith(".blend")]
-                    if version_files:
-                        versions = []
-                        for f in version_files:
-                            try:
-                                version_str = f.replace(f"{self.project_short}_{asset_name}_{stage}_v", "").replace(".blend", "")
-                                version_num = int(version_str)
-                                versions.append(version_num)
-                            except ValueError:
-                                continue
-                        if versions:
-                            max_version = max(versions)
-                            latest_version = f"v{max_version + 1:03d}"
-
-                created_time = "Unknown"
-                if os.path.exists(latest_file_path):
-                    created_time = datetime.fromtimestamp(os.path.getctime(latest_file_path)).strftime("%Y-%m-%d %H:%M:%S")
-
-                self.description_label.setText(
-                    f"Scene: {latest_file}\n"
-                    f"Version: {latest_version}\n"
-                    f"Created: {created_time}"
-                )
-
-                self.current_thumbnail = os.path.join(asset_dir, "thumbnail.jpg")
-                if self.current_thumbnail and os.path.exists(self.current_thumbnail):
-                    pixmap = QPixmap(self.current_thumbnail)
-                    if not pixmap.isNull():
-                        self.thumbnail_label.setPixmap(pixmap.scaled(100, 100, Qt.KeepAspectRatio))
-                    else:
-                        pixmap = QPixmap(DEFAULT_THUMBNAIL)
-                        self.thumbnail_label.setPixmap(pixmap.scaled(100, 100, Qt.KeepAspectRatio))
-                else:
-                    pixmap = QPixmap(DEFAULT_THUMBNAIL)
-                    self.thumbnail_label.setPixmap(pixmap.scaled(100, 100, Qt.KeepAspectRatio))
-
-                self.current_file = latest_file_path
-                if not os.path.exists(self.current_file):
-                    self.open_file_btn.setEnabled(False)
-                    self.description_label.setText(
-                        f"Scene: {latest_file}\n"
-                        f"Version: {latest_version}\n"
-                        f"Created: {created_time} (File not found)"
-                    )
-                else:
-                    self.open_file_btn.setEnabled(True)
-
                 self.current_playblast_dir = asset_dir
-                self.update_media_player()
-
-                if self.asset_table and isinstance(self.asset_table, QTableWidget):
-                    try:
-                        if not sip.isdeleted(self.asset_table):
-                            self.asset_table.clearSelection()
-                    except SystemError:
-                        pass
-                if self.shot_list and isinstance(self.shot_list, QListWidget):
-                    try:
-                        if not sip.isdeleted(self.shot_list):
-                            self.shot_list.clearSelection()
-                    except SystemError:
-                        pass
-                if self.asset_table and isinstance(self.asset_table, QTableWidget):
-                    try:
-                        if not sip.isdeleted(self.asset_table):
-                            self.asset_table.selectRow(row)
-                            self.asset_table.setFocus()
-                    except SystemError:
-                        pass
+                if self.tabs.currentWidget() == self.media_tab:  # Chỉ cập nhật nếu ở tab Media
+                    self.update_media_player()
                 break
 
     def show_shot_details(self, item):
@@ -878,88 +954,22 @@ class AssetManager(QMainWindow):
         shot_name = item.text()
         for shot in self.shots:
             if shot["name"] == shot_name:
-                latest_file = f"{shot_name}.blend"
-                latest_file_path = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}/{shot_name}.blend")
-                
                 shot_dir = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
-                old_dir = os.path.join(shot_dir, ".old")
-                latest_version = "v001"
-
-                if os.path.exists(old_dir):
-                    old_files = [f for f in os.listdir(old_dir) if os.path.isfile(os.path.join(old_dir, f))]
-                    version_files = [f for f in old_files if f.startswith(f"{shot_name}_v") and f.endswith(".blend")]
-                    if version_files:
-                        versions = []
-                        for f in version_files:
-                            try:
-                                version_str = f.replace(f"{shot_name}_v", "").replace(".blend", "")
-                                version_num = int(version_str)
-                                versions.append(version_num)
-                            except ValueError:
-                                continue
-                        if versions:
-                            max_version = max(versions)
-                            latest_version = f"v{max_version + 1:03d}"
-
-                created_time = "Unknown"
-                if os.path.exists(latest_file_path):
-                    created_time = datetime.fromtimestamp(os.path.getctime(latest_file_path)).strftime("%Y-%m-%d %H:%M:%S")
-
-                self.description_label.setText(
-                    f"Scene: {latest_file}\n"
-                    f"Version: {latest_version}\n"
-                    f"Created: {created_time}"
-                )
-
-                self.current_thumbnail = None
-                self.thumbnail_label.setPixmap(QPixmap())
-
-                self.current_file = latest_file_path
-                if not os.path.exists(self.current_file):
-                    self.open_file_btn.setEnabled(False)
-                    self.description_label.setText(
-                        f"Scene: {latest_file}\n"
-                        f"Version: {latest_version}\n"
-                        f"Created: {created_time} (File not found)"
-                    )
-                else:
-                    self.open_file_btn.setEnabled(True)
-
                 self.current_playblast_dir = shot_dir
-                self.update_media_player()
-
-                if self.asset_table and isinstance(self.asset_table, QTableWidget):
-                    try:
-                        if not sip.isdeleted(self.asset_table):
-                            self.asset_table.clearSelection()
-                    except SystemError:
-                        pass
+                if self.tabs.currentWidget() == self.media_tab:  # Chỉ cập nhật nếu ở tab Media
+                    self.update_media_player()
                 break
-
-    def open_in_blender(self, event=None):
-        if self.current_file and os.path.exists(self.current_file):
-            try:
-                with open(self.current_file, "rb") as f:
-                    header = f.read(7)
-                    if header != b"BLENDER":
-                        self.status_label.setText(f"Error: '{self.current_file}' is not a valid Blender file")
-                        return
-                process = subprocess.Popen([BLENDER_PATH, self.current_file], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                self.status_label.setText(f"Opened '{os.path.basename(self.current_file)}' in Blender")
-            except FileNotFoundError:
-                self.status_label.setText(f"Blender executable not found at: {BLENDER_PATH}")
-            except Exception as e:
-                self.status_label.setText(f"Error: {str(e)}")
-        else:
-            self.status_label.setText("No valid file to open")
 
     def add_asset(self):
         dialog = AddAssetDialog(self)
         dialog.move(QDesktopWidget().availableGeometry().center() - dialog.rect().center())
         if dialog.exec_():
-            asset_type, asset_name, stage = dialog.get_data()  # Cập nhật để lấy stage
+            asset_type, asset_name, stage = dialog.get_data()
             if not asset_name:
-                self.status_label.setText("Asset name cannot be empty!")
+                message = "Asset name cannot be empty!..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.status_label.setText(message)
                 return
 
             asset_type_lower = asset_type.lower()
@@ -981,16 +991,22 @@ class AssetManager(QMainWindow):
                     if os.path.exists(TEMPLATE_BLEND_FILE):
                         shutil.copy(TEMPLATE_BLEND_FILE, latest_file)
                     else:
-                        self.status_label.setText(f"Error: Template file '{TEMPLATE_BLEND_FILE}' not found!")
+                        message = f"Error: Template file '{TEMPLATE_BLEND_FILE}' not found!..."
+                        if len(message) > 50:
+                            message = message[:47] + "..."
+                        self.status_label.setText(message)
                         return
             except Exception as e:
-                self.status_label.setText(f"Error creating directory or files: {str(e)}")
+                message = f"Error creating directory or files: {str(e)}..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.status_label.setText(message)
                 return
 
             new_asset = {
                 "name": asset_name,
                 "type": asset_type,
-                "stage": stage,  # Thêm trường stage
+                "stage": stage,
                 "status": "To Do",
                 "assignee": "",
                 "versions": [
@@ -1005,7 +1021,10 @@ class AssetManager(QMainWindow):
             self.assets.append(new_asset)
             self.save_data()
             self.load_data_ui()
-            self.status_label.setText(f"Asset '{asset_name}' (Type: {asset_type}, Stage: {stage}) created successfully!")
+            message = f"Asset '{asset_name}' (Type: {asset_type}, Stage: {stage}) created successfully!..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
 
     def add_shot(self):
         dialog = AddShotDialog(self)
@@ -1013,7 +1032,10 @@ class AssetManager(QMainWindow):
         if dialog.exec_():
             shot_name = dialog.get_data()
             if not shot_name:
-                self.status_label.setText("Shot name cannot be empty!")
+                message = "Shot name cannot be empty!..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.status_label.setText(message)
                 return
 
             full_shot_name = f"{self.project_short}_{shot_name}"
@@ -1031,10 +1053,16 @@ class AssetManager(QMainWindow):
                     if os.path.exists(TEMPLATE_BLEND_FILE):
                         shutil.copy(TEMPLATE_BLEND_FILE, latest_file)
                     else:
-                        self.status_label.setText(f"Error: Template file '{TEMPLATE_BLEND_FILE}' not found!")
+                        message = f"Error: Template file '{TEMPLATE_BLEND_FILE}' not found!..."
+                        if len(message) > 50:
+                            message = message[:47] + "..."
+                        self.status_label.setText(message)
                         return
             except Exception as e:
-                self.status_label.setText(f"Error creating directory or files: {str(e)}")
+                message = f"Error creating directory or files: {str(e)}..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.status_label.setText(message)
                 return
 
             new_shot = {
@@ -1050,17 +1078,26 @@ class AssetManager(QMainWindow):
             self.shots.append(new_shot)
             self.save_data()
             self.load_data_ui()
-            self.status_label.setText(f"Shot '{full_shot_name}' created successfully!")
+            message = f"Shot '{full_shot_name}' created successfully!..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
 
     def refresh_data(self):
         assets_dir = os.path.join(self.project_path, "03_Production", "assets")
         if not os.path.exists(assets_dir):
-            self.status_label.setText("Assets directory not found!")
+            message = "Assets directory not found!..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
             return
 
         sequencer_dir = os.path.join(self.project_path, "03_Production", "sequencer")
         if not os.path.exists(sequencer_dir):
-            self.status_label.setText("Sequencer directory not found!")
+            message = "Sequencer directory not found!..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
             return
 
         new_assets = []
@@ -1126,4 +1163,8 @@ class AssetManager(QMainWindow):
         self.shots = new_shots
         self.save_data()
         self.load_data_ui()
-        self.status_label.setText("Data refreshed successfully!")
+        self.load_scenes_list()  # Cập nhật danh sách Scenes
+        message = "Data refreshed successfully!..."
+        if len(message) > 50:
+            message = message[:47] + "..."
+        self.status_label.setText(message)
