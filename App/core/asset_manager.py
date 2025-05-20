@@ -11,10 +11,10 @@ import numpy as np
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
-                             QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget, QHeaderView)
+                             QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget, QHeaderView, QMenu, QApplication)
 from PyQt5.QtMultimediaWidgets import QVideoWidget
-from PyQt5.QtGui import QPixmap, QIcon, QColor
-from PyQt5.QtCore import Qt, QSettings, QUrl
+from PyQt5.QtGui import QPixmap, QIcon, QColor, QCursor
+from PyQt5.QtCore import Qt, QSettings, QUrl, QEvent
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from utils.paths import get_project_data_path
 from utils.dialogs import AddAssetDialog, AddShotDialog
@@ -319,6 +319,8 @@ class AssetManager(QMainWindow):
         self.scenes_list = QListWidget()
         self.scenes_list.setViewMode(QListWidget.ListMode)
         self.scenes_list.setSpacing(5)
+        self.scenes_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.scenes_list.customContextMenuRequested.connect(self.show_context_menu)
         scenes_layout.addWidget(self.scenes_list)
 
         # Kết nối sự kiện double-click để mở file Blender
@@ -383,6 +385,102 @@ class AssetManager(QMainWindow):
 
         # Gọi switch_mode để khởi tạo giao diện ban đầu
         self.switch_mode("Assets")
+
+    def show_context_menu(self, position):
+        """Hiển thị menu chuột phải khi click vào item trong scenes_list, asset_lists, hoặc shot_list."""
+        # Xác định widget hiện tại
+        widget = self.sender()
+        if not widget:
+            return
+
+        item = widget.itemAt(position)
+        if not item:
+            return
+
+        # Lấy dữ liệu dựa trên tab hiện tại
+        if widget == self.scenes_list:
+            display_name = item.data(Qt.UserRole)
+            if not display_name or display_name == "No Blender files found in scenefiles directories.":
+                return
+            file_path = self.scene_file_paths.get(display_name)
+            if not file_path:
+                return
+            folder_path = os.path.dirname(file_path)  # Thư mục chứa file Blender
+        elif widget in self.asset_lists.values():
+            asset_name = item.text()
+            asset = next((a for a in self.assets if a["name"] == asset_name), None)
+            if not asset:
+                return
+            asset_type = asset["type"].lower()
+            folder_path = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}")
+        elif widget == self.shot_list:
+            shot_name = item.text()
+            folder_path = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
+
+        menu = QMenu()
+        open_in_explorer = menu.addAction("Open in Explorer")
+        open_in_explorer.setShortcut("Ctrl+E")
+        copy_path = menu.addAction("Copy đường dẫn")
+        copy_path.setShortcut("Ctrl+C")
+        delete = menu.addAction("Delete")
+        delete.setShortcut("Ctrl+X")
+
+        action = menu.exec_(widget.viewport().mapToGlobal(position))
+        if action == open_in_explorer:
+            self.open_in_explorer(folder_path)
+        elif action == copy_path:
+            self.copy_path(folder_path)
+        elif action == delete:
+            self.delete_file(folder_path, os.path.basename(folder_path) if os.path.isdir(folder_path) else os.path.basename(os.path.dirname(folder_path)))
+
+    def open_in_explorer(self, file_path):
+        """Mở File Explorer tại thư mục chứa file hoặc thư mục asset/shot."""
+        try:
+            folder_path = os.path.dirname(file_path)
+            os.startfile(folder_path)  # Mở thư mục trong File Explorer
+            message = f"Opened folder '{os.path.basename(folder_path)}' in Explorer..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
+        except Exception as e:
+            message = f"Error opening Explorer: {str(e)}..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
+
+    def copy_path(self, file_path):
+        """Sao chép đường dẫn của thư mục chứa file Blender vào clipboard."""
+        folder_path = os.path.dirname(file_path)  # Lấy thư mục chứa file
+        clipboard = QApplication.clipboard()
+        clipboard.setText(folder_path)  # Sao chép đường dẫn thư mục
+        message = f"Copied folder path of '{os.path.basename(file_path)}' to clipboard..."
+        if len(message) > 50:
+            message = message[:47] + "..."
+        self.status_label.setText(message)
+
+    def delete_file(self, folder_path, display_name):
+        """Xóa thư mục chứa file Blender hoặc toàn bộ thư mục asset/shot với xác nhận."""
+        reply = QMessageBox.question(self, "Xác nhận xóa", 
+                                    f"Bạn có chắc muốn xóa '{display_name}' và các file liên quan không? Hành động này không thể hoàn tác!",
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            try:
+                if os.path.isdir(folder_path):
+                    shutil.rmtree(folder_path)  # Xóa toàn bộ thư mục
+                else:
+                    os.remove(folder_path)  # Xóa file nếu không phải thư mục
+                # Cập nhật lại danh sách Scenes, Assets, hoặc Shots
+                self.load_scenes_list()
+                self.load_data_ui()
+                message = f"Deleted '{display_name}' and related files..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.status_label.setText(message)
+            except Exception as e:
+                message = f"Error deleting: {str(e)}..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.status_label.setText(message)
 
     def load_scenes_list(self):
         """Quét và hiển thị danh sách các file .blend từ thư mục scenefiles của tất cả assets."""
@@ -562,6 +660,8 @@ class AssetManager(QMainWindow):
                     self.content_layout.addWidget(section_btn)
 
                     asset_list = QListWidget()
+                    asset_list.setContextMenuPolicy(Qt.CustomContextMenu)
+                    asset_list.customContextMenuRequested.connect(self.show_context_menu)
                     asset_list.itemClicked.connect(self.show_asset_details)
                     self.asset_lists[asset_type] = asset_list
                     self.content_layout.addWidget(asset_list)
@@ -598,6 +698,8 @@ class AssetManager(QMainWindow):
                 self.content_layout.addWidget(shot_section_btn)
 
                 self.shot_list = QListWidget()
+                self.shot_list.setContextMenuPolicy(Qt.CustomContextMenu)
+                self.shot_list.customContextMenuRequested.connect(self.show_context_menu)
                 self.shot_list.itemClicked.connect(self.show_shot_details)
                 self.shot_list.setViewMode(QListWidget.ListMode)
                 self.shot_list.setSpacing(5)

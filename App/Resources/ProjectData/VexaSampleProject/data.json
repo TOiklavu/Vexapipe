@@ -44,6 +44,81 @@
                     "thumbnail": "03_Production/assets/characters/Vex/thumbnail.jpg"
                 }
             ]
+        },
+        {
+            "name": "a",
+            "type": "Characters",
+            "stage": "Modeling",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "03_Production/assets/characters/a/scenefiles/VSP_a_Modeling.blend",
+                    "thumbnail": "03_Production/assets/characters/a/thumbnail.jpg"
+                }
+            ]
+        },
+        {
+            "name": "b",
+            "type": "Characters",
+            "stage": "Modeling",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "03_Production/assets/characters/b/scenefiles/VSP_b_Modeling.blend",
+                    "thumbnail": "03_Production/assets/characters/b/thumbnail.jpg"
+                }
+            ]
+        },
+        {
+            "name": "d",
+            "type": "Characters",
+            "stage": "Modeling",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "03_Production/assets/characters/d/scenefiles/VSP_d_Modeling.blend",
+                    "thumbnail": "03_Production/assets/characters/d/thumbnail.jpg"
+                }
+            ]
+        },
+        {
+            "name": "e",
+            "type": "Characters",
+            "stage": "Modeling",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "03_Production/assets/characters/e/scenefiles/VSP_e_Modeling.blend",
+                    "thumbnail": "03_Production/assets/characters/e/thumbnail.jpg"
+                }
+            ]
+        },
+        {
+            "name": "f",
+            "type": "Characters",
+            "stage": "Modeling",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "03_Production/assets/characters/f/scenefiles/VSP_f_Modeling.blend",
+                    "thumbnail": "03_Production/assets/characters/f/thumbnail.jpg"
+                }
+            ]
         }
     ],
     "section_states": {
