@@ -100,6 +100,9 @@ class AssetManager(QMainWindow):
             QListWidget::item:selected {
                 background-color: #4a90e2;
             }
+            QListWidget::item:hover {  /* Thêm hiệu ứng hover cho item trong QListWidget */
+                background-color: #555555;
+            }
             QTabWidget::pane {
                 border: 1px solid #555555;
                 background-color: #3c3f41;
@@ -133,6 +136,9 @@ class AssetManager(QMainWindow):
                 color: #ffffff;
                 font-family: 'Arial';
                 font-size: 14px;
+            }
+            QLabel:hover {  /* Thêm hiệu ứng hover cho QLabel trong danh sách Scenes */
+                background-color: #555555;
             }
             QPushButton#sectionButton {
                 background-color: #3c3f41;
@@ -318,9 +324,6 @@ class AssetManager(QMainWindow):
         # Kết nối sự kiện double-click để mở file Blender
         self.scenes_list.itemDoubleClicked.connect(self.open_scene_in_blender)
 
-        # Load danh sách các file .blend từ thư mục scenefiles của tất cả assets
-        self.load_scenes_list()
-
         # Tab Tasks (chứa asset_table)
         tasks_layout = QVBoxLayout(self.tasks_tab)
         self.asset_table = QTableWidget()
@@ -378,6 +381,7 @@ class AssetManager(QMainWindow):
         left_layout.setSpacing(10)
         right_layout.setSpacing(10)
 
+        # Gọi switch_mode để khởi tạo giao diện ban đầu
         self.switch_mode("Assets")
 
     def load_scenes_list(self):
@@ -465,7 +469,7 @@ class AssetManager(QMainWindow):
                             f"Version: {latest_version}\n"
                             f"Created: {created_time}"
                         )
-                        info_label.setStyleSheet("QLabel { background-color: #3c3f41; padding: 5px; color: #ffffff; }")
+                        info_label.setStyleSheet("QLabel { background-color: #3c3f41; padding: 5px; color: #ffffff; } QLabel:hover { background-color: #555555; }")
                         item_layout.addWidget(info_label)
 
                         # Tạo QListWidgetItem và gán widget

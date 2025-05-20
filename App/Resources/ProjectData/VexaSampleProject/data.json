@@ -29,6 +29,21 @@
                     "thumbnail": "03_Production/assets/props/DienThoai/thumbnail.jpg"
                 }
             ]
+        },
+        {
+            "name": "Vex",
+            "type": "Characters",
+            "stage": "Modeling",
+            "status": "To Do",
+            "assignee": "",
+            "versions": [
+                {
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": "03_Production/assets/characters/Vex/scenefiles/VSP_Vex_Modeling.blend",
+                    "thumbnail": "03_Production/assets/characters/Vex/thumbnail.jpg"
+                }
+            ]
         }
     ],
     "section_states": {
