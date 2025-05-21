@@ -6,14 +6,14 @@ import shutil
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, QListWidget, QListWidgetItem, QMessageBox, QDesktopWidget
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtCore import Qt, QSize, QSettings
+
 from core.asset_manager import AssetManager
-from utils.paths import get_projects_data_path
 from utils.dialogs import AddProjectDialog, LoginDialog
 
 BASE_DIR = "D:/OneDrive/Desktop/Projects/Vexapipe/App"
 RESOURCES_DIR = os.path.join(BASE_DIR, "Resources")
-PROJECTS_DIR = "D:/OneDrive/Desktop/Projects/Vexapipe/Projects"
 PROJECT_DATA_DIR = os.path.join(RESOURCES_DIR, "ProjectData")
+PROJECT_LOCATIONS_FILE = os.path.join(BASE_DIR, "project_locations.json")
 
 DEFAULT_PROJECT_THUMBNAIL = os.path.join(RESOURCES_DIR, "default_project_thumbnail.jpg")
 USERS_FILE = os.path.join(BASE_DIR, "users.json")
@@ -108,48 +108,70 @@ class MainWindow(QMainWindow):
 
     def load_projects(self):
         self.project_list.clear()
-        data_file = get_projects_data_path()
-        if os.path.exists(data_file):
-            with open(data_file, 'r') as f:
-                data = json.load(f)
-                for project in data["projects"]:
-                    item = QListWidgetItem()
-                    item.setText(project["name"])
-                    item.setData(Qt.UserRole, project["path"])
-                    thumbnail_path = project.get("thumbnail", DEFAULT_PROJECT_THUMBNAIL)
-                    if os.path.exists(thumbnail_path):
-                        pixmap = QPixmap(thumbnail_path)
-                        if not pixmap.isNull():
-                            item.setIcon(QIcon(pixmap))
-                        else:
-                            item.setIcon(QIcon(DEFAULT_PROJECT_THUMBNAIL))
-                    else:
-                        item.setIcon(QIcon(DEFAULT_PROJECT_THUMBNAIL))
-                    self.project_list.addItem(item)
+        # Đọc danh sách các Project Locations từ file cấu hình
+        project_locations = []
+        if os.path.exists(PROJECT_LOCATIONS_FILE):
+            with open(PROJECT_LOCATIONS_FILE, 'r') as f:
+                project_locations = json.load(f).get("locations", [])
+        
+        # Nếu chưa có Project Location, thêm BASE_DIR/Projects làm mặc định
+        if not project_locations:
+            default_location = os.path.join(BASE_DIR, "Projects")
+            if not os.path.exists(default_location):
+                os.makedirs(default_location)
+            project_locations = [default_location]
+            with open(PROJECT_LOCATIONS_FILE, 'w') as f:
+                json.dump({"locations": project_locations}, f, indent=4)
 
+        # Quét các dự án từ các Project Locations
+        for location in project_locations:
+            if os.path.isdir(location):
+                for project_dir in os.listdir(location):
+                    project_path = os.path.join(location, project_dir)
+                    if os.path.isdir(project_path):
+                        pipeline_dir = os.path.join(project_path, "00_Pipeline")
+                        project_json_path = os.path.join(pipeline_dir, "project.json")
+                        if os.path.exists(project_json_path):
+                            try:
+                                with open(project_json_path, 'r') as f:
+                                    project_data = json.load(f)
+                                    item = QListWidgetItem()
+                                    item.setText(project_data["name"])
+                                    item.setData(Qt.UserRole, project_path)
+                                    thumbnail_path = project_data.get("thumbnail", DEFAULT_PROJECT_THUMBNAIL)
+                                    if os.path.exists(thumbnail_path):
+                                        pixmap = QPixmap(thumbnail_path)
+                                        if not pixmap.isNull():
+                                            item.setIcon(QIcon(pixmap))
+                                        else:
+                                            item.setIcon(QIcon(DEFAULT_PROJECT_THUMBNAIL))
+                                    else:
+                                        item.setIcon(QIcon(DEFAULT_PROJECT_THUMBNAIL))
+                                    self.project_list.addItem(item)
+                            except Exception as e:
+                                print(f"Error loading project.json at {project_json_path}: {e}")
 
     def add_project(self):
         dialog = AddProjectDialog(self)
         dialog.move(QDesktopWidget().availableGeometry().center() - dialog.rect().center())
         if dialog.exec_():
-            project_name, project_short = dialog.get_data()
-            if not project_name:
+            project_name, project_short, project_location = dialog.get_data()
+            if not project_name or not project_location:
+                QMessageBox.warning(self, "Error", "Project Name và Project Location không được để trống!")
                 return
             if not project_short:
                 project_short = project_name
 
-            # Tạo thư mục dự án trong Projects (chỉ chứa assets)
-            project_path = os.path.join(PROJECTS_DIR, project_name)
+            # Tạo thư mục dự án tại vị trí người dùng chọn
+            project_path = os.path.join(project_location, project_name)
             os.makedirs(project_path, exist_ok=True)
-            assets_dir = os.path.join(project_path, "assets")
-            os.makedirs(assets_dir, exist_ok=True)
 
-            # Tạo thư mục trong ProjectData để lưu dữ liệu
-            project_data_dir = os.path.join(PROJECT_DATA_DIR, project_name)
-            os.makedirs(project_data_dir, exist_ok=True)
+            # Tạo thư mục 00_Pipeline trong thư mục dự án
+            pipeline_dir = os.path.join(project_path, "00_Pipeline")
+            os.makedirs(pipeline_dir, exist_ok=True)
 
-            # Tạo thư mục icons trong ProjectData và sao chép các file icon
-            project_icons_dir = os.path.join(project_data_dir, "icons")
+            # Tạo thư mục icons trong 00_Pipeline và sao chép các file icon
+            project_icons_dir = os.path.join(pipeline_dir, "icons")
             os.makedirs(project_icons_dir, exist_ok=True)
             if os.path.exists(DEFAULT_ICONS_DIR):
                 for icon_file in os.listdir(DEFAULT_ICONS_DIR):
@@ -158,39 +180,45 @@ class MainWindow(QMainWindow):
                     if os.path.isfile(src_path) and not os.path.exists(dst_path):
                         shutil.copy(src_path, dst_path)
 
-            # Lưu thumbnail vào ProjectData
-            project_thumbnail = os.path.join(project_data_dir, "thumbnail.jpg")
+            # Lưu thumbnail vào 00_Pipeline
+            project_thumbnail = os.path.join(pipeline_dir, "thumbnail.jpg")
             if os.path.exists(DEFAULT_PROJECT_THUMBNAIL) and not os.path.exists(project_thumbnail):
                 shutil.copy(DEFAULT_PROJECT_THUMBNAIL, project_thumbnail)
 
-            # Lưu projects.json
-            data_file = get_projects_data_path()
-            if os.path.exists(data_file):
-                with open(data_file, 'r') as f:
-                    data = json.load(f)
-            else:
-                data = {"projects": []}
-
-            data["projects"].append({
+            # Tạo project.json trong 00_Pipeline
+            project_json_path = os.path.join(pipeline_dir, "project.json")
+            project_data = {
                 "name": project_name,
                 "short": project_short,
                 "path": project_path,
                 "thumbnail": project_thumbnail
-            })
+            }
+            with open(project_json_path, 'w') as f:
+                json.dump(project_data, f, indent=4)
 
-            with open(data_file, 'w') as f:
-                json.dump(data, f, indent=4)
-
-            self.load_projects()
-
-            # Lưu data.json vào ProjectData
-            project_data_file = os.path.join(project_data_dir, "data.json")
+            # Lưu data.json vào 00_Pipeline
+            project_data_file = os.path.join(pipeline_dir, "data.json")
             with open(project_data_file, 'w') as f:
                 json.dump({
                     "assets": [],
                     "section_states": {"Characters": True, "Props": True, "VFXs": True},
                     "short": project_short
                 }, f, indent=4)
+
+            # Lưu Project Location nếu chưa có
+            if project_location not in self.get_project_locations():
+                project_locations = self.get_project_locations()
+                project_locations.append(project_location)
+                with open(PROJECT_LOCATIONS_FILE, 'w') as f:
+                    json.dump({"locations": project_locations}, f, indent=4)
+
+            self.load_projects()
+
+    def get_project_locations(self):
+        if os.path.exists(PROJECT_LOCATIONS_FILE):
+            with open(PROJECT_LOCATIONS_FILE, 'r') as f:
+                return json.load(f).get("locations", [])
+        return []
 
     def open_project(self, item):
         project_path = item.data(Qt.UserRole)
@@ -210,41 +238,61 @@ class MainWindow(QMainWindow):
         if os.path.exists(LAST_LOGIN_FILE):
             os.remove(LAST_LOGIN_FILE)
         self.close()
-        # Hiển thị lại dialog đăng nhập
-        current_user = login()
-        if current_user:
-            new_window = MainWindow(current_user)
-            new_window.show()
-        else:
-            sys.exit()
+        # Hiển thị lại dialog đăng nhập trong cùng một phiên ứng dụng
+        app = QApplication.instance()
+        current_user = None
+        while not current_user:
+            current_user = login()
+            if not current_user:
+                if QMessageBox.question(None, "Exit", "Đăng nhập thất bại. Bạn có muốn thoát ứng dụng không?",
+                                        QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+                    app.quit()
+                    return
+        # Tạo mới MainWindow với người dùng vừa đăng nhập
+        new_window = MainWindow(current_user)
+        new_window.show()
 
+# Định nghĩa các hàm standalone ở cấp module
 def login():
-    dialog = LoginDialog()
-    # Đặt dialog ở giữa màn hình
+    app = QApplication.instance()
+    if not app:
+        app = QApplication(sys.argv)
+    
+    # Load users from users.json
+    users = []
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, 'r') as f:
+                users_data = json.load(f)
+                users = users_data.get("users", [])
+        except Exception as e:
+            print(f"Error loading users.json: {e}")
+    
+    # Tạo LoginDialog với danh sách users
+    dialog = LoginDialog(users)
     dialog.move(QDesktopWidget().availableGeometry().center() - dialog.rect().center())
     if dialog.exec_():
-        username, password = dialog.get_data()
+        username, password = dialog.get_data()  # Giả sử get_data() trả về tuple (username, password)
         if not username or not password:
             msg = QMessageBox()
             msg.setWindowTitle("Login Failed")
-            msg.setText("Username and password cannot be empty!")
+            msg.setText("Username và password không được để trống!")
             msg.setStandardButtons(QMessageBox.Ok)
             msg.move(QDesktopWidget().availableGeometry().center() - msg.rect().center())
             msg.exec_()
             return None
-
-        if os.path.exists(USERS_FILE):
-            with open(USERS_FILE, 'r') as f:
-                users_data = json.load(f)
-                for user in users_data["users"]:
-                    if user["username"] == username and user["password"] == password:
-                        # Lưu thông tin đăng nhập vào last_login.json
-                        with open(LAST_LOGIN_FILE, 'w') as f:
-                            json.dump(user, f, indent=4)
-                        return user
+        
+        # Kiểm tra thông tin đăng nhập
+        for user in users:
+            if user["username"] == username and user["password"] == password:
+                current_user = user
+                with open(LAST_LOGIN_FILE, 'w') as f:
+                    json.dump(current_user, f, indent=4)
+                return current_user
+        
         msg = QMessageBox()
         msg.setWindowTitle("Login Failed")
-        msg.setText("Invalid username or password!")
+        msg.setText("Username hoặc password không đúng!")
         msg.setStandardButtons(QMessageBox.Ok)
         msg.move(QDesktopWidget().availableGeometry().center() - msg.rect().center())
         msg.exec_()
@@ -276,17 +324,18 @@ def check_last_project():
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     current_user = check_last_login()
+
+    # Đăng nhập lần đầu nếu cần
     if not current_user:
-        while not current_user:
-            current_user = login()
-            if not current_user:
-                if QMessageBox.question(None, "Exit", "Do you want to exit the application?",
-                                        QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
-                    sys.exit()
+        current_user = login()
+        if not current_user:
+            if QMessageBox.question(None, "Exit", "Bạn có muốn thoát ứng dụng không?",
+                                    QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+                sys.exit(app.exec_())
 
-    # Luôn tạo MainWindow
+    # Tạo MainWindow
     main_window = MainWindow(current_user)
-
+    
     # Kiểm tra dự án cuối cùng được mở
     last_project_path = check_last_project()
     if last_project_path:
@@ -299,4 +348,5 @@ if __name__ == "__main__":
         # Nếu không, hiển thị MainWindow
         main_window.show()
 
-    sys.exit(app.exec_())
+    # Chạy ứng dụng
+    app.exec_()

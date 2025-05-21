@@ -8,6 +8,7 @@ import re
 import cv2
 import sip
 import numpy as np
+import tempfile
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
@@ -16,15 +17,9 @@ from PyQt5.QtMultimediaWidgets import QVideoWidget
 from PyQt5.QtGui import QPixmap, QIcon, QColor, QCursor
 from PyQt5.QtCore import Qt, QSettings, QUrl, QEvent
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from utils.paths import get_project_data_path
 from utils.dialogs import AddAssetDialog, AddShotDialog
 
-BLENDER_PATH = "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe"
-RESOURCES_DIR = "D:/OneDrive/Desktop/Projects/Vexapipe/App/Resources"
-TEMPLATE_BLEND_FILE = os.path.join(RESOURCES_DIR, "template.blend")
-DEFAULT_THUMBNAIL = os.path.join(RESOURCES_DIR, "default_thumbnail.jpg")
-USERS_FILE = "D:/OneDrive/Desktop/Projects/Vexapipe/App/users.json"
-TEMP_VIDEO_PATH = os.path.join(RESOURCES_DIR, "temp_playblast.mp4")
+BASE_DIR = "D:/OneDrive/Desktop/Projects/Vexapipe/App"
 
 class AssetManager(QMainWindow):
     def __init__(self, project_path, show_lobby_callback, current_user):
@@ -33,7 +28,22 @@ class AssetManager(QMainWindow):
         self.show_lobby_callback = show_lobby_callback
         self.current_user = current_user
         self.project_name = os.path.basename(project_path)
-        self.icons_dir = os.path.join(RESOURCES_DIR, "ProjectData", self.project_name, "icons")
+        
+        # Đường dẫn đến các thư mục trong dự án
+        self.pipeline_dir = os.path.join(self.project_path, "00_Pipeline")
+        self.icons_dir = os.path.join(self.pipeline_dir, "icons")
+        self.default_thumbnail = os.path.join(BASE_DIR, "Resources", "default_thumbnail.jpg")
+        self.data_file = os.path.join(self.pipeline_dir, "data.json")
+        self.users_file = os.path.join(os.path.dirname(os.path.dirname(self.project_path)), "users.json")
+        
+        # Đường dẫn đến Blender và template file (có thể lấy từ file cấu hình sau này)
+        self.blender_path = "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe"  # Nên chuyển vào file cấu hình
+        self.template_blend_file = os.path.join(BASE_DIR, "Resources", "template.blend")
+        
+        # Tạo file tạm thời cho video
+        self.temp_video_fd, self.temp_video_path = tempfile.mkstemp(suffix=".mp4")
+        os.close(self.temp_video_fd)
+
         self.setWindowTitle(f"Blender Asset Manager - {self.project_name} (Logged in as {self.current_user['username']})")
         
         # Tạo cấu trúc thư mục ban đầu cho dự án
@@ -42,7 +52,6 @@ class AssetManager(QMainWindow):
         self.settings = QSettings("MyCompany", "BlenderAssetManager")
         self.restoreGeometry(self.settings.value("AssetManager/geometry", b""))
 
-        self.data_file = get_project_data_path(project_path)
         self.data = self.load_data()
         self.project_short = self.data.get("short", self.project_name)
         self.assets = self.data.get("assets", [])
@@ -58,6 +67,7 @@ class AssetManager(QMainWindow):
             "VFXs": True
         }
         self.shot_section_state = self.data.get("shot_section_state", True)
+        self.content_section_state = self.data.get("content_section_state", True)
 
         self.asset_lists = {
             "Characters": None,
@@ -211,19 +221,19 @@ class AssetManager(QMainWindow):
             self.media_player.setVideoOutput(None)  # Ngắt kết nối video output
 
         # Xóa file video tạm thời
-        if os.path.exists(TEMP_VIDEO_PATH):
+        if os.path.exists(self.temp_video_path):
             try:
-                os.remove(TEMP_VIDEO_PATH)
+                os.remove(self.temp_video_path)
             except PermissionError:
                 # Nếu không xóa được, ghi log hoặc bỏ qua
-                self.status_label.setText(f"Warning: Could not delete {TEMP_VIDEO_PATH}...")
+                self.status_label.setText(f"Warning: Could not delete {self.temp_video_path}...")
         
         self.settings.setValue("AssetManager/geometry", self.saveGeometry())
         super().closeEvent(event)
 
     def load_team_members(self):
-        if os.path.exists(USERS_FILE):
-            with open(USERS_FILE, 'r') as f:
+        if os.path.exists(self.users_file):
+            with open(self.users_file, 'r') as f:
                 users_data = json.load(f)
                 return [user["username"] for user in users_data["users"]]
         return []
@@ -237,6 +247,7 @@ class AssetManager(QMainWindow):
             "shots": [],
             "section_states": {"Characters": True, "Props": True, "VFXs": True},
             "shot_section_state": True,
+            "content_section_state": True,
             "short": ""
         }
 
@@ -246,6 +257,7 @@ class AssetManager(QMainWindow):
             self.data["shots"] = self.shots
             self.data["section_states"] = self.section_states
             self.data["shot_section_state"] = self.shot_section_state
+            self.data["content_section_state"] = self.content_section_state
             self.data["short"] = self.project_short
             json.dump(self.data, f, indent=4)
 
@@ -265,23 +277,82 @@ class AssetManager(QMainWindow):
         home_btn.clicked.connect(self.show_lobby_callback)
         left_layout.addWidget(home_btn)
 
-        mode_btn_layout = QHBoxLayout()
-        self.assets_btn = QPushButton("Assets")
-        self.assets_btn.setObjectName("modeButton")
-        self.assets_btn.clicked.connect(lambda: self.switch_mode("Assets"))
-        mode_btn_layout.addWidget(self.assets_btn)
+        # Thêm section Assets
+        assets_section_btn = QPushButton("Assets")
+        assets_section_btn.setObjectName("sectionButton")
+        down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
+        if os.path.exists(down_arrow_path):
+            assets_section_btn.setIcon(QIcon(down_arrow_path))
+        else:
+            assets_section_btn.setText("Assets ▼")
+        assets_section_btn.clicked.connect(lambda: self.toggle_section_group("Assets"))
+        left_layout.addWidget(assets_section_btn)
 
-        self.shots_btn = QPushButton("Shots")
-        self.shots_btn.setObjectName("modeButton")
-        self.shots_btn.clicked.connect(lambda: self.switch_mode("Shots"))
-        mode_btn_layout.addWidget(self.shots_btn)
-        left_layout.addLayout(mode_btn_layout)
+        self.assets_widget = QWidget()
+        self.assets_layout = QVBoxLayout(self.assets_widget)
+        self.assets_layout.setContentsMargins(10, 0, 0, 0)
+        self.assets_layout.setSpacing(5)
 
-        self.content_widget = QWidget()
-        self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.setSpacing(5)
-        left_layout.addWidget(self.content_widget)
+        for asset_type in ["Characters", "Props", "VFXs"]:
+            section_btn = QPushButton(asset_type)
+            section_btn.setObjectName("sectionButton")
+            section_btn.setProperty("asset_type", asset_type)
+            down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
+            if os.path.exists(down_arrow_path):
+                section_btn.setIcon(QIcon(down_arrow_path))
+            else:
+                section_btn.setText(f"{asset_type} ▼")
+            section_btn.clicked.connect(lambda checked, at=asset_type: self.toggle_section(at))
+            self.assets_layout.addWidget(section_btn)
+
+            asset_list = QListWidget()
+            asset_list.setContextMenuPolicy(Qt.CustomContextMenu)
+            asset_list.customContextMenuRequested.connect(self.show_context_menu)
+            asset_list.itemClicked.connect(self.show_asset_details)
+            self.asset_lists[asset_type] = asset_list
+            self.assets_layout.addWidget(asset_list)
+
+        self.add_asset_btn = QPushButton("Add Asset")
+        add_icon_path = os.path.join(self.icons_dir, "add_icon.png")
+        if os.path.exists(add_icon_path):
+            self.add_asset_btn.setIcon(QIcon(add_icon_path))
+        self.add_asset_btn.clicked.connect(self.add_asset)
+        self.assets_layout.addWidget(self.add_asset_btn)
+
+        left_layout.addWidget(self.assets_widget)
+
+        # Thêm section Shots
+        shots_section_btn = QPushButton("Shots")
+        shots_section_btn.setObjectName("sectionButton")
+        down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
+        if os.path.exists(down_arrow_path):
+            shots_section_btn.setIcon(QIcon(down_arrow_path))
+        else:
+            shots_section_btn.setText("Shots ▼")
+        shots_section_btn.clicked.connect(lambda: self.toggle_section_group("Shots"))
+        left_layout.addWidget(shots_section_btn)
+
+        self.shots_widget = QWidget()
+        self.shots_layout = QVBoxLayout(self.shots_widget)
+        self.shots_layout.setContentsMargins(10, 0, 0, 0)
+        self.shots_layout.setSpacing(5)
+
+        self.shot_list = QListWidget()
+        self.shot_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.shot_list.customContextMenuRequested.connect(self.show_context_menu)
+        self.shot_list.itemClicked.connect(self.show_shot_details)
+        self.shot_list.setViewMode(QListWidget.ListMode)
+        self.shot_list.setSpacing(5)
+        self.shots_layout.addWidget(self.shot_list)
+
+        self.add_shot_btn = QPushButton("Add Shot")
+        add_icon_path = os.path.join(self.icons_dir, "add_icon.png")
+        if os.path.exists(add_icon_path):
+            self.add_shot_btn.setIcon(QIcon(add_icon_path))
+        self.add_shot_btn.clicked.connect(self.add_shot)
+        self.shots_layout.addWidget(self.add_shot_btn)
+
+        left_layout.addWidget(self.shots_widget)
 
         refresh_btn = QPushButton("Refresh")
         refresh_icon_path = os.path.join(self.icons_dir, "refresh_icon.png")
@@ -294,7 +365,7 @@ class AssetManager(QMainWindow):
         right_layout = QVBoxLayout(right_widget)
         right_widget.setMinimumWidth(600)
 
-        # Khởi tạo các tab
+        # Thêm tabs cho Scenes và các tab khác
         self.tabs = QTabWidget()
         self.scenes_tab = QWidget()
         self.products_tab = QWidget()
@@ -370,10 +441,10 @@ class AssetManager(QMainWindow):
         products_layout = QVBoxLayout(self.products_tab)
         libraries_layout = QVBoxLayout(self.libraries_tab)
 
+        right_layout.addWidget(self.tabs)
+
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("QLabel { background-color: #3c3f41; padding: 5px; color: #aaaaaa; }")
-
-        right_layout.addWidget(self.tabs)
         right_layout.addWidget(self.status_label)
 
         main_layout.addWidget(self.left_widget, 1)
@@ -383,8 +454,89 @@ class AssetManager(QMainWindow):
         left_layout.setSpacing(10)
         right_layout.setSpacing(10)
 
-        # Gọi switch_mode để khởi tạo giao diện ban đầu
-        self.switch_mode("Assets")
+        # Gọi load_data_ui sau khi tất cả giao diện đã được khởi tạo
+        self.load_data_ui()
+
+    def toggle_section(self, asset_type):
+        self.section_states[asset_type] = not self.section_states[asset_type]
+        asset_list = self.asset_lists[asset_type]
+        asset_list.setVisible(self.section_states[asset_type])
+
+        section_btn = None
+        for btn in self.assets_widget.findChildren(QPushButton):
+            if btn.property("asset_type") == asset_type:
+                section_btn = btn
+                break
+
+        if section_btn:
+            type_counts = {"Characters": 0, "Props": 0, "VFXs": 0}
+            for asset in self.assets:
+                at = asset["type"]
+                if at in type_counts:
+                    type_counts[at] += 1
+            if self.section_states[asset_type]:
+                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
+                if os.path.exists(down_arrow_path):
+                    section_btn.setIcon(QIcon(down_arrow_path))
+                else:
+                    section_btn.setText(f"{asset_type} ({type_counts[asset_type]}) ▼")
+            else:
+                right_arrow_path = os.path.join(self.icons_dir, "right_arrow.png")
+                if os.path.exists(right_arrow_path):
+                    section_btn.setIcon(QIcon(right_arrow_path))
+                else:
+                    section_btn.setText(f"{asset_type} ({type_counts[asset_type]}) ►")
+        else:
+            print(f"Warning: Could not find section button for {asset_type}")
+
+        self.data["section_states"] = self.section_states
+        self.save_data()
+
+    def toggle_section_group(self, group):
+        if group == "Assets":
+            self.assets_widget.setVisible(not self.assets_widget.isVisible())
+            if self.assets_widget.isVisible():
+                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
+                if os.path.exists(down_arrow_path):
+                    for btn in self.left_widget.findChildren(QPushButton):
+                        if btn.text() == "Assets":
+                            btn.setIcon(QIcon(down_arrow_path))
+                else:
+                    for btn in self.left_widget.findChildren(QPushButton):
+                        if btn.text() == "Assets":
+                            btn.setText("Assets ▼")
+            else:
+                right_arrow_path = os.path.join(self.icons_dir, "right_arrow.png")
+                if os.path.exists(right_arrow_path):
+                    for btn in self.left_widget.findChildren(QPushButton):
+                        if btn.text() == "Assets":
+                            btn.setIcon(QIcon(right_arrow_path))
+                else:
+                    for btn in self.left_widget.findChildren(QPushButton):
+                        if btn.text() == "Assets":
+                            btn.setText("Assets ►")
+        elif group == "Shots":
+            self.shots_widget.setVisible(not self.shots_widget.isVisible())
+            if self.shots_widget.isVisible():
+                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
+                if os.path.exists(down_arrow_path):
+                    for btn in self.left_widget.findChildren(QPushButton):
+                        if btn.text() == "Shots":
+                            btn.setIcon(QIcon(down_arrow_path))
+                else:
+                    for btn in self.left_widget.findChildren(QPushButton):
+                        if btn.text() == "Shots":
+                            btn.setText("Shots ▼")
+            else:
+                right_arrow_path = os.path.join(self.icons_dir, "right_arrow.png")
+                if os.path.exists(right_arrow_path):
+                    for btn in self.left_widget.findChildren(QPushButton):
+                        if btn.text() == "Shots":
+                            btn.setIcon(QIcon(right_arrow_path))
+                else:
+                    for btn in self.left_widget.findChildren(QPushButton):
+                        if btn.text() == "Shots":
+                            btn.setText("Shots ►")
 
     def show_context_menu(self, position):
         """Hiển thị menu chuột phải khi click vào item trong scenes_list, asset_lists, hoặc shot_list."""
@@ -510,6 +662,8 @@ class AssetManager(QMainWindow):
 
                 # Đường dẫn đến thumbnail
                 thumbnail_path = os.path.join(asset_dir, "thumbnail.jpg")
+                if not os.path.exists(thumbnail_path):
+                    thumbnail_path = self.default_thumbnail
 
                 # Quét các file .blend trong thư mục scenefiles
                 for file_name in os.listdir(scenefiles_dir):
@@ -554,10 +708,10 @@ class AssetManager(QMainWindow):
                             if not pixmap.isNull():
                                 thumbnail_label.setPixmap(pixmap.scaled(50, 50, Qt.KeepAspectRatio))
                             else:
-                                pixmap = QPixmap(DEFAULT_THUMBNAIL)
+                                pixmap = QPixmap(self.default_thumbnail)
                                 thumbnail_label.setPixmap(pixmap.scaled(50, 50, Qt.KeepAspectRatio))
                         else:
-                            pixmap = QPixmap(DEFAULT_THUMBNAIL)
+                            pixmap = QPixmap(self.default_thumbnail)
                             thumbnail_label.setPixmap(pixmap.scaled(50, 50, Qt.KeepAspectRatio))
                         item_layout.addWidget(thumbnail_label)
 
@@ -610,13 +764,13 @@ class AssetManager(QMainWindow):
                         message = message[:47] + "..."
                     self.status_label.setText(message)
                     return
-            subprocess.Popen([BLENDER_PATH, file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.Popen([self.blender_path, file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             message = f"Opened '{os.path.basename(file_path)}' in Blender..."
             if len(message) > 50:
                 message = message[:47] + "..."
             self.status_label.setText(message)
         except FileNotFoundError:
-            message = f"Blender executable not found at: {BLENDER_PATH}..."
+            message = f"Blender executable not found at: {self.blender_path}..."
             if len(message) > 50:
                 message = message[:47] + "..."
             self.status_label.setText(message)
@@ -627,241 +781,53 @@ class AssetManager(QMainWindow):
             self.status_label.setText(message)
 
     def switch_mode(self, mode):
-        self.current_mode = mode
+        pass  # Không cần thiết nữa vì tab sẽ tự xử lý chuyển đổi
 
-        if mode == "Assets":
-            self.assets_btn.setStyleSheet("QPushButton#modeButton { background-color: #4a90e2; }")
-            self.shots_btn.setStyleSheet("QPushButton#modeButton { background-color: #3c3f41; }")
-        else:
-            self.assets_btn.setStyleSheet("QPushButton#modeButton { background-color: #3c3f41; }")
-            self.shots_btn.setStyleSheet("QPushButton#modeButton { background-color: #4a90e2; }")
+    def load_data_ui(self):
+        # Cập nhật Assets
+        type_counts = {"Characters": 0, "Props": 0, "VFXs": 0}
+        for asset in self.assets:
+            asset_type = asset["type"]
+            if asset_type in type_counts:
+                type_counts[asset_type] += 1
 
-        # Xóa tất cả các widget trong content_layout hiện tại
-        while self.content_layout.count():
-            item = self.content_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.setParent(None)  # Ngắt kết nối widget khỏi layout
-            del item
+        for asset_type in self.asset_lists:
+            if self.asset_lists[asset_type]:
+                self.asset_lists[asset_type].clear()
 
-        if mode == "Assets":
-            for asset_type in ["Characters", "Props", "VFXs"]:
-                if self.asset_lists[asset_type] is None:
-                    # Tạo mới section button và list widget
-                    section_btn = QPushButton(asset_type)
-                    section_btn.setObjectName("sectionButton")
-                    section_btn.setProperty("asset_type", asset_type)
+        for asset in self.assets:
+            asset_type = asset["type"]
+            if asset_type in self.asset_lists:
+                self.asset_lists[asset_type].addItem(asset["name"])
+
+        for asset_type in self.asset_lists:
+            section_btn = None
+            for btn in self.assets_widget.findChildren(QPushButton):
+                if btn.property("asset_type") == asset_type:
+                    section_btn = btn
+                    break
+            if section_btn:
+                section_btn.setText(f"{asset_type} ({type_counts[asset_type]})")
+                if self.section_states[asset_type]:
                     down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
                     if os.path.exists(down_arrow_path):
                         section_btn.setIcon(QIcon(down_arrow_path))
                     else:
-                        section_btn.setText(f"{asset_type} ▼")
-                    section_btn.clicked.connect(lambda checked, at=asset_type: self.toggle_section(at))
-                    self.content_layout.addWidget(section_btn)
-
-                    asset_list = QListWidget()
-                    asset_list.setContextMenuPolicy(Qt.CustomContextMenu)
-                    asset_list.customContextMenuRequested.connect(self.show_context_menu)
-                    asset_list.itemClicked.connect(self.show_asset_details)
-                    self.asset_lists[asset_type] = asset_list
-                    self.content_layout.addWidget(asset_list)
-                else:
-                    # Thêm lại section button và list widget
-                    section_btn = None
-                    for btn in self.content_widget.findChildren(QPushButton):
-                        if btn.property("asset_type") == asset_type:
-                            section_btn = btn
-                            break
-                    if section_btn:
-                        self.content_layout.addWidget(section_btn)
-                    self.content_layout.addWidget(self.asset_lists[asset_type])
-
-            add_asset_btn = QPushButton("Add Asset")
-            add_icon_path = os.path.join(self.icons_dir, "add_icon.png")
-            if os.path.exists(add_icon_path):
-                add_asset_btn.setIcon(QIcon(add_icon_path))
-            add_asset_btn.clicked.connect(self.add_asset)
-            self.content_layout.addWidget(add_asset_btn)
-
-            self.load_data_ui()
-        else:
-            if self.shot_list is None:
-                # Tạo mới shot section button và list widget
-                shot_section_btn = QPushButton("Shots")
-                shot_section_btn.setObjectName("sectionButton")
-                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-                if os.path.exists(down_arrow_path):
-                    shot_section_btn.setIcon(QIcon(down_arrow_path))
-                else:
-                    shot_section_btn.setText("Shots ▼")
-                shot_section_btn.clicked.connect(self.toggle_shot_section)
-                self.content_layout.addWidget(shot_section_btn)
-
-                self.shot_list = QListWidget()
-                self.shot_list.setContextMenuPolicy(Qt.CustomContextMenu)
-                self.shot_list.customContextMenuRequested.connect(self.show_context_menu)
-                self.shot_list.itemClicked.connect(self.show_shot_details)
-                self.shot_list.setViewMode(QListWidget.ListMode)
-                self.shot_list.setSpacing(5)
-                self.content_layout.addWidget(self.shot_list)
-
-                add_shot_btn = QPushButton("Add Shot")
-                add_icon_path = os.path.join(self.icons_dir, "add_icon.png")
-                if os.path.exists(add_icon_path):
-                    add_shot_btn.setIcon(QIcon(add_icon_path))
-                add_shot_btn.clicked.connect(self.add_shot)
-                self.content_layout.addWidget(add_shot_btn)
-            else:
-                # Thêm lại shot section button và list widget
-                shot_section_btn = None
-                for btn in self.content_widget.findChildren(QPushButton):
-                    if btn.text().startswith("Shots"):
-                        shot_section_btn = btn
-                        break
-                if shot_section_btn:
-                    self.content_layout.addWidget(shot_section_btn)
-                self.content_layout.addWidget(self.shot_list)
-
-                add_shot_btn = QPushButton("Add Shot")
-                add_icon_path = os.path.join(self.icons_dir, "add_icon.png")
-                if os.path.exists(add_icon_path):
-                    add_shot_btn.setIcon(QIcon(add_icon_path))
-                add_shot_btn.clicked.connect(self.add_shot)
-                self.content_layout.addWidget(add_shot_btn)
-
-            self.load_data_ui()
-
-    def toggle_section(self, asset_type):
-        self.section_states[asset_type] = not self.section_states[asset_type]
-        asset_list = self.asset_lists[asset_type]
-        asset_list.setVisible(self.section_states[asset_type])
-
-        section_btn = None
-        for btn in self.content_widget.findChildren(QPushButton):
-            if btn.property("asset_type") == asset_type:
-                section_btn = btn
-                break
-
-        if section_btn:
-            type_counts = {"Characters": 0, "Props": 0, "VFXs": 0}
-            for asset in self.assets:
-                at = asset["type"]
-                if at in type_counts:
-                    type_counts[at] += 1
-            if self.section_states[asset_type]:
-                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-                if os.path.exists(down_arrow_path):
-                    section_btn.setIcon(QIcon(down_arrow_path))
-                else:
-                    section_btn.setText(f"{asset_type} ({type_counts[asset_type]}) ▼")
-            else:
-                right_arrow_path = os.path.join(self.icons_dir, "right_arrow.png")
-                if os.path.exists(right_arrow_path):
-                    section_btn.setIcon(QIcon(right_arrow_path))
-                else:
-                    section_btn.setText(f"{asset_type} ({type_counts[asset_type]}) ►")
-        else:
-            print(f"Warning: Could not find section button for {asset_type}")
-
-        self.data["section_states"] = self.section_states
-        self.save_data()
-
-    def toggle_shot_section(self):
-        self.shot_section_state = not self.shot_section_state
-        self.shot_list.setVisible(self.shot_section_state)
-
-        shot_section_btn = None
-        for btn in self.content_widget.findChildren(QPushButton):
-            if btn.text().startswith("Shots"):
-                shot_section_btn = btn
-                break
-
-        if shot_section_btn:
-            shot_count = len(self.shots)
-            if self.shot_section_state:
-                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-                if os.path.exists(down_arrow_path):
-                    shot_section_btn.setIcon(QIcon(down_arrow_path))
-                else:
-                    shot_section_btn.setText(f"Shots ({shot_count}) ▼")
-            else:
-                right_arrow_path = os.path.join(self.icons_dir, "right_arrow.png")
-                if os.path.exists(right_arrow_path):
-                    shot_section_btn.setIcon(QIcon(right_arrow_path))
-                else:
-                    shot_section_btn.setText(f"Shots ({shot_count}) ►")
-
-        self.data["shot_section_state"] = self.shot_section_state
-        self.save_data()
-
-    def load_data_ui(self):
-        if self.current_mode == "Assets":
-            type_counts = {"Characters": 0, "Props": 0, "VFXs": 0}
-            for asset in self.assets:
-                asset_type = asset["type"]
-                if asset_type in type_counts:
-                    type_counts[asset_type] += 1
-
-            for asset_type in self.asset_lists:
-                if self.asset_lists[asset_type]:
-                    self.asset_lists[asset_type].clear()
-
-            for asset in self.assets:
-                asset_type = asset["type"]
-                if asset_type in self.asset_lists:
-                    self.asset_lists[asset_type].addItem(asset["name"])
-
-            for asset_type in self.asset_lists:
-                section_btn = None
-                for btn in self.content_widget.findChildren(QPushButton):
-                    if btn.property("asset_type") == asset_type:
-                        section_btn = btn
-                        break
-                if section_btn:
-                    section_btn.setText(f"{asset_type} ({type_counts[asset_type]})")
-                    if self.section_states[asset_type]:
-                        down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-                        if os.path.exists(down_arrow_path):
-                            section_btn.setIcon(QIcon(down_arrow_path))
-                        else:
-                            section_btn.setText(f"{asset_type} ({type_counts[asset_type]}) ▼")
-                    else:
-                        right_arrow_path = os.path.join(self.icons_dir, "right_arrow.png")
-                        if os.path.exists(right_arrow_path):
-                            section_btn.setIcon(QIcon(right_arrow_path))
-                        else:
-                            section_btn.setText(f"{asset_type} ({type_counts[asset_type]}) ►")
-                self.asset_lists[asset_type].setVisible(self.section_states[asset_type])
-
-            self.update_asset_table()
-        else:
-            if self.shot_list:
-                self.shot_list.clear()
-
-            for shot in self.shots:
-                self.shot_list.addItem(shot["name"])
-
-            shot_section_btn = None
-            for btn in self.content_widget.findChildren(QPushButton):
-                if btn.text().startswith("Shots"):
-                    shot_section_btn = btn
-                    break
-            if shot_section_btn:
-                shot_count = len(self.shots)
-                shot_section_btn.setText(f"Shots ({shot_count})")
-                if self.shot_section_state:
-                    down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-                    if os.path.exists(down_arrow_path):
-                        shot_section_btn.setIcon(QIcon(down_arrow_path))
-                    else:
-                        shot_section_btn.setText(f"Shots ({shot_count}) ▼")
+                        section_btn.setText(f"{asset_type} ({type_counts[asset_type]}) ▼")
                 else:
                     right_arrow_path = os.path.join(self.icons_dir, "right_arrow.png")
                     if os.path.exists(right_arrow_path):
-                        shot_section_btn.setIcon(QIcon(right_arrow_path))
+                        section_btn.setIcon(QIcon(right_arrow_path))
                     else:
-                        shot_section_btn.setText(f"Shots ({shot_count}) ►")
-            self.shot_list.setVisible(self.shot_section_state)
+                        section_btn.setText(f"{asset_type} ({type_counts[asset_type]}) ►")
+            self.asset_lists[asset_type].setVisible(self.section_states[asset_type])
+
+        # Cập nhật Shots
+        if self.shot_list:
+            self.shot_list.clear()
+
+        for shot in self.shots:
+            self.shot_list.addItem(shot["name"])
 
         self.load_scenes_list()  # Cập nhật danh sách Scenes
 
@@ -974,7 +940,7 @@ class AssetManager(QMainWindow):
 
         # Tạo video writer
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        video_writer = cv2.VideoWriter(TEMP_VIDEO_PATH, fourcc, 24.0, (width, height))
+        video_writer = cv2.VideoWriter(self.temp_video_path, fourcc, 24.0, (width, height))
 
         # Ghi từng frame vào video
         for image_file in image_files:
@@ -1017,11 +983,11 @@ class AssetManager(QMainWindow):
             self.media_player.stop()
             self.media_player.setMedia(QMediaContent())  # Giải phóng file cũ
 
-        if os.path.exists(TEMP_VIDEO_PATH):
+        if os.path.exists(self.temp_video_path):
             try:
-                os.remove(TEMP_VIDEO_PATH)
+                os.remove(self.temp_video_path)
             except PermissionError:
-                message = f"Warning: Could not delete old {TEMP_VIDEO_PATH}..."
+                message = f"Warning: Could not delete old {self.temp_video_path}..."
                 if len(message) > 50:
                     message = message[:47] + "..."
                 self.status_label.setText(message)
@@ -1029,7 +995,7 @@ class AssetManager(QMainWindow):
 
         # Tạo video từ chuỗi ảnh
         if self.create_video_from_frames(playblast_dir):
-            self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(TEMP_VIDEO_PATH)))
+            self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.temp_video_path)))
             message = f"Loaded playblast from {playblast_dir}..."
             if len(message) > 50:
                 message = message[:47] + "..."
@@ -1083,25 +1049,33 @@ class AssetManager(QMainWindow):
             scenefiles_dir = os.path.join(asset_dir, "scenefiles")
             textures_dir = os.path.join(asset_dir, "textures")
             outputs_dir = os.path.join(asset_dir, "outputs")
+            playblast_dir = os.path.join(asset_dir, "playblast")
             old_dir = os.path.join(scenefiles_dir, ".old")
             latest_file = os.path.join(scenefiles_dir, f"{self.project_short}_{asset_name}_{stage}.blend")
+            thumbnail_path = os.path.join(asset_dir, "thumbnail.jpg")
 
             try:
                 os.makedirs(asset_dir, exist_ok=True)
                 os.makedirs(scenefiles_dir, exist_ok=True)
                 os.makedirs(textures_dir, exist_ok=True)
                 os.makedirs(outputs_dir, exist_ok=True)
+                os.makedirs(playblast_dir, exist_ok=True)
                 os.makedirs(old_dir, exist_ok=True)
 
                 if not os.path.exists(latest_file):
-                    if os.path.exists(TEMPLATE_BLEND_FILE):
-                        shutil.copy(TEMPLATE_BLEND_FILE, latest_file)
+                    if os.path.exists(self.template_blend_file):
+                        shutil.copy(self.template_blend_file, latest_file)
                     else:
-                        message = f"Error: Template file '{TEMPLATE_BLEND_FILE}' not found!..."
+                        message = f"Error: Template file '{self.template_blend_file}' not found!..."
                         if len(message) > 50:
                             message = message[:47] + "..."
                         self.status_label.setText(message)
                         return
+
+                # Sao chép thumbnail mặc định nếu chưa có
+                if not os.path.exists(thumbnail_path) and os.path.exists(self.default_thumbnail):
+                    shutil.copy(self.default_thumbnail, thumbnail_path)
+
             except Exception as e:
                 message = f"Error creating directory or files: {str(e)}..."
                 if len(message) > 50:
@@ -1156,10 +1130,10 @@ class AssetManager(QMainWindow):
                 os.makedirs(playblast_dir, exist_ok=True)
 
                 if not os.path.exists(latest_file):
-                    if os.path.exists(TEMPLATE_BLEND_FILE):
-                        shutil.copy(TEMPLATE_BLEND_FILE, latest_file)
+                    if os.path.exists(self.template_blend_file):
+                        shutil.copy(self.template_blend_file, latest_file)
                     else:
-                        message = f"Error: Template file '{TEMPLATE_BLEND_FILE}' not found!..."
+                        message = f"Error: Template file '{self.template_blend_file}' not found!..."
                         if len(message) > 50:
                             message = message[:47] + "..."
                         self.status_label.setText(message)
