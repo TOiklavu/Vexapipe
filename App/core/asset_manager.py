@@ -12,7 +12,7 @@ import tempfile
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
-                             QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget, QHeaderView, QMenu, QApplication)
+                             QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget, QHeaderView, QMenu, QApplication, QSplitter)
 from PyQt5.QtMultimediaWidgets import QVideoWidget
 from PyQt5.QtGui import QPixmap, QIcon, QColor, QCursor
 from PyQt5.QtCore import Qt, QSettings, QUrl, QEvent
@@ -78,6 +78,7 @@ class AssetManager(QMainWindow):
 
         self.left_widget = None
         self.asset_table = None
+        self.splitter = None  # Thêm biến để lưu QSplitter
 
         self.current_mode = "Assets"
         self.assets_btn = None
@@ -227,6 +228,10 @@ class AssetManager(QMainWindow):
             except PermissionError:
                 # Nếu không xóa được, ghi log hoặc bỏ qua
                 self.status_label.setText(f"Warning: Could not delete {self.temp_video_path}...")
+        
+        # Lưu trạng thái splitter
+        if self.splitter:
+            self.settings.setValue("splitter_state", self.splitter.saveState())
         
         self.settings.setValue("AssetManager/geometry", self.saveGeometry())
         super().closeEvent(event)
@@ -447,8 +452,16 @@ class AssetManager(QMainWindow):
         self.status_label.setStyleSheet("QLabel { background-color: #3c3f41; padding: 5px; color: #aaaaaa; }")
         right_layout.addWidget(self.status_label)
 
-        main_layout.addWidget(self.left_widget, 1)
-        main_layout.addWidget(right_widget, 3)
+        # Sử dụng QSplitter thay cho stretch factor
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.addWidget(self.left_widget)
+        self.splitter.addWidget(right_widget)
+        self.splitter.setStretchFactor(0, 1)  # Tỷ lệ ban đầu cho left_widget
+        self.splitter.setStretchFactor(1, 3)  # Tỷ lệ ban đầu cho right_widget
+        main_layout.addWidget(self.splitter)
+
+        # Khôi phục trạng thái splitter từ settings
+        self.splitter.restoreState(self.settings.value("splitter_state", b""))
 
         main_layout.setSpacing(10)
         left_layout.setSpacing(10)
