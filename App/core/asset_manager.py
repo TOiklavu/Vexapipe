@@ -14,12 +14,12 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
                              QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget, QHeaderView, QMenu, QApplication, QSplitter)
 from PyQt5.QtMultimediaWidgets import QVideoWidget
-from PyQt5.QtGui import QPixmap, QIcon, QColor, QCursor
+from PyQt5.QtGui import QPixmap, QIcon, QColor, QCursor, QFont
 from PyQt5.QtCore import Qt, QSettings, QUrl, QEvent
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from utils.dialogs import AddAssetDialog, AddShotDialog
 
-BASE_DIR = "D:/OneDrive/Desktop/Projects/Vexapipe/App"
+BASE_DIR = "D:/OneDrive/Desktop/Projects/Vexapine/App"
 
 class AssetManager(QMainWindow):
     def __init__(self, project_path, show_lobby_callback, current_user):
@@ -28,25 +28,22 @@ class AssetManager(QMainWindow):
         self.show_lobby_callback = show_lobby_callback
         self.current_user = current_user
         self.project_name = os.path.basename(project_path)
+        self.selected_asset = None
         
-        # Đường dẫn đến các thư mục trong dự án
         self.pipeline_dir = os.path.join(self.project_path, "00_Pipeline")
         self.icons_dir = os.path.join(self.pipeline_dir, "icons")
         self.default_thumbnail = os.path.join(BASE_DIR, "Resources", "default_thumbnail.jpg")
         self.data_file = os.path.join(self.pipeline_dir, "data.json")
         self.users_file = os.path.join(os.path.dirname(os.path.dirname(self.project_path)), "users.json")
         
-        # Đường dẫn đến Blender và template file (có thể lấy từ file cấu hình sau này)
-        self.blender_path = "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe"  # Nên chuyển vào file cấu hình
+        self.blender_path = "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe"
         self.template_blend_file = os.path.join(BASE_DIR, "Resources", "template.blend")
         
-        # Tạo file tạm thời cho video
         self.temp_video_fd, self.temp_video_path = tempfile.mkstemp(suffix=".mp4")
         os.close(self.temp_video_fd)
 
         self.setWindowTitle(f"Blender Asset Manager - {self.project_name} (Logged in as {self.current_user['username']})")
         
-        # Tạo cấu trúc thư mục ban đầu cho dự án
         self._create_initial_structure()
         
         self.settings = QSettings("MyCompany", "BlenderAssetManager")
@@ -78,7 +75,7 @@ class AssetManager(QMainWindow):
 
         self.left_widget = None
         self.asset_table = None
-        self.splitter = None  # Thêm biến để lưu QSplitter
+        self.splitter = None
 
         self.current_mode = "Assets"
         self.assets_btn = None
@@ -89,151 +86,59 @@ class AssetManager(QMainWindow):
         self.media_player = None
         self.video_widget = None
 
-        self.scene_file_paths = {}  # Để lưu đường dẫn file .blend
+        self.scene_file_paths = {}
+
+        self.selected_scene_item = None  # Theo dõi item được chọn trong scenes_list
+        self.selected_scene_item_widget = None  # Theo dõi widget của item được chọn
 
         self.init_ui()
 
         self.setStyleSheet("""
-            QMainWindow {
-                background-color: #2b2b2b;
-            }
-            QWidget {
-                background-color: #2b2b2b;
-                color: #ffffff;
-            }
-            QListWidget {
-                background-color: #3c3f41;
-                border: 1px solid #555555;
-                color: #ffffff;
-                font-family: 'Arial';
-                font-size: 14px;
-            }
-            QListWidget::item:selected {
-                background-color: #4a90e2;
-            }
-            QListWidget::item:hover {  /* Thêm hiệu ứng hover cho item trong QListWidget */
-                background-color: #555555;
-            }
-            QTabWidget::pane {
-                border: 1px solid #555555;
-                background-color: #3c3f41;
-            }
-            QTabBar::tab {
-                background-color: #3c3f41;
-                color: #ffffff;
-                padding: 8px;
-                font-family: 'Arial';
-                font-size: 12px;
-                text-align: center;  /* Căn giữa chữ cho tất cả tab */
-            }
-            QTabBar::tab:selected {
-                background-color: #4a90e2;
-            }
-            QPushButton {
-                background-color: #4a90e2;
-                color: #ffffff;
-                border: none;
-                padding: 5px;
-                border-radius: 3px;
-                font-family: 'Arial';
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #357abd;
-            }
-            QPushButton:disabled {
-                background-color: #555555;
-            }
-            QLabel {
-                color: #ffffff;
-                font-family: 'Arial';
-                font-size: 14px;
-            }
-            QLabel:hover {  /* Thêm hiệu ứng hover cho QLabel trong danh sách Scenes */
-                background-color: #555555;
-            }
-            QPushButton#sectionButton {
-                background-color: #3c3f41;
-                color: #ffffff;
-                border: none;
-                padding: 5px;
-                text-align: left;
-                font-family: 'Arial';
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton#sectionButton:hover {
-                background-color: #4a90e2;
-            }
-            QPushButton#modeButton {
-                background-color: #3c3f41;
-                color: #ffffff;
-                border: none;
-                padding: 5px;
-                font-family: 'Arial';
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton#modeButton:hover {
-                background-color: #4a90e2;
-            }
-            QTableWidget {
-                background-color: #3c3f41;
-                color: #ffffff;
-                border: 1px solid #555555;
-                font-family: 'Arial';
-                font-size: 14px;
-            }
-            QTableWidget::item {
-                background-color: #3c3f41;
-                border: 1px solid #555555;
-            }
-            QTableWidget::item:selected {
-                background-color: #4a90e2;
-            }
-            QComboBox {
-                background-color: #3c3f41;
-                color: #ffffff;
-                border: 1px solid #555555;
-                padding: 3px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
+            QMainWindow { background-color: #2b2b2b; }
+            QWidget { background-color: #2b2b2b; color: #ffffff; }
+            QListWidget { background-color: #3c3f41; border: 1px solid #555555; color: #ffffff; font-family: 'Arial'; font-size: 14px; }
+            QListWidget::item:selected { background-color: #4a90e2; }
+            QTabWidget::pane { border: 1px solid #555555; background-color: #3c3f41; }
+            QTabBar::tab { background-color: #3c3f41; color: #ffffff; padding: 8px; font-family: 'Arial'; font-size: 12px; min-width: 100px; }
+            QTabBar::tab:selected { background-color: #4a90e2; }
+            QPushButton { background-color: #4a90e2; color: #ffffff; border: none; padding: 5px; border-radius: 3px; font-family: 'Arial'; font-size: 14px; }
+            QPushButton:hover { background-color: #357abd; }
+            QPushButton:disabled { background-color: #555555; }
+            QLabel { color: #ffffff; font-family: 'Arial'; font-size: 14px; }
+            QPushButton#sectionButton { background-color: #3c3f41; color: #ffffff; border: none; padding: 5px; text-align: left; font-family: 'Arial'; font-size: 14px; font-weight: bold; }
+            QPushButton#sectionButton:hover { background-color: #4a90e2; }
+            QPushButton#modeButton { background-color: #3c3f41; color: #ffffff; border: none; padding: 5px; font-family: 'Arial'; font-size: 14px; font-weight: bold; }
+            QPushButton#modeButton:hover { background-color: #4a90e2; }
+            QTableWidget { background-color: #3c3f41; color: #ffffff; border: 1px solid #555555; font-family: 'Arial'; font-size: 14px; }
+            QTableWidget::item { background-color: #3c3f41; border: 1px solid #555555; }
+            QTableWidget::item:selected { background-color: #4a90e2; }
+            QComboBox { background-color: #3c3f41; color: #ffffff; border: 1px solid #555555; padding: 3px; }
+            QComboBox::drop-down { border: none; }
+            .scene-title { font-weight: bold; font-size: 18px; }
+            .scene-stage { background-color: red; border-radius: 3px; padding: 2px 8px; margin: 2px 0; display: inline-block; }
+            .scene-date { font-size: 14px; margin-left: 10px; }
+            .scene-creator { font-size: 14px; }
+            .scene-thumbnail { max-width: 10%; height: auto; }
         """)
 
     def _create_initial_structure(self):
-        """Tạo cấu trúc thư mục ban đầu cho dự án."""
-        folders = [
-            "00_Pipeline",
-            "01_Management",
-            "02_Designs",
-            "03_Production",
-            "04_Resources"
-        ]
+        folders = ["00_Pipeline", "01_Management", "02_Designs", "03_Production", "04_Resources"]
         for folder in folders:
             folder_path = os.path.join(self.project_path, folder)
             os.makedirs(folder_path, exist_ok=True)
 
     def closeEvent(self, event):
-        # Dừng và giải phóng QMediaPlayer
         if self.media_player:
             self.media_player.stop()
-            self.media_player.setMedia(QMediaContent())  # Xóa media để giải phóng file
-            self.media_player.setVideoOutput(None)  # Ngắt kết nối video output
-
-        # Xóa file video tạm thời
+            self.media_player.setMedia(QMediaContent())
+            self.media_player.setVideoOutput(None)
         if os.path.exists(self.temp_video_path):
             try:
                 os.remove(self.temp_video_path)
             except PermissionError:
-                # Nếu không xóa được, ghi log hoặc bỏ qua
                 self.status_label.setText(f"Warning: Could not delete {self.temp_video_path}...")
-        
-        # Lưu trạng thái splitter
         if self.splitter:
             self.settings.setValue("splitter_state", self.splitter.saveState())
-        
         self.settings.setValue("AssetManager/geometry", self.saveGeometry())
         super().closeEvent(event)
 
@@ -248,14 +153,7 @@ class AssetManager(QMainWindow):
         if os.path.exists(self.data_file):
             with open(self.data_file, 'r') as f:
                 return json.load(f)
-        return {
-            "assets": [],
-            "shots": [],
-            "section_states": {"Characters": True, "Props": True, "VFXs": True},
-            "shot_section_state": True,
-            "content_section_state": True,
-            "short": ""
-        }
+        return {"assets": [], "shots": [], "section_states": {"Characters": True, "Props": True, "VFXs": True}, "shot_section_state": True, "content_section_state": True, "short": ""}
 
     def save_data(self):
         with open(self.data_file, 'w') as f:
@@ -276,7 +174,6 @@ class AssetManager(QMainWindow):
         left_layout = QVBoxLayout(self.left_widget)
         self.left_widget.setMinimumWidth(300)
         
-        # Thêm Home button
         home_btn = QPushButton("Home")
         home_icon_path = os.path.join(self.icons_dir, "home_icon.png")
         if os.path.exists(home_icon_path):
@@ -284,7 +181,6 @@ class AssetManager(QMainWindow):
         home_btn.clicked.connect(self.show_lobby_callback)
         left_layout.addWidget(home_btn)
 
-        # Tạo QTabWidget cho Left-bar
         self.left_tabs = QTabWidget()
         self.assets_tab = QWidget()
         self.shots_tab = QWidget()
@@ -295,7 +191,9 @@ class AssetManager(QMainWindow):
         self.left_tabs.addTab(self.assets_tab, QIcon(assets_icon_path) if os.path.exists(assets_icon_path) else QIcon(), "Assets")
         self.left_tabs.addTab(self.shots_tab, QIcon(shots_icon_path) if os.path.exists(shots_icon_path) else QIcon(), "Shots")
 
-        # Tab Assets
+        self.left_tabs.tabBar().setMinimumSize(100, 30)
+        self.left_tabs.tabBar().setUsesScrollButtons(False)
+
         assets_layout = QVBoxLayout(self.assets_tab)
         self.assets_widget = QWidget()
         self.assets_layout = QVBoxLayout(self.assets_widget)
@@ -330,7 +228,6 @@ class AssetManager(QMainWindow):
 
         assets_layout.addWidget(self.assets_widget)
 
-        # Tab Shots
         shots_layout = QVBoxLayout(self.shots_tab)
         self.shots_widget = QWidget()
         self.shots_layout = QVBoxLayout(self.shots_widget)
@@ -356,7 +253,6 @@ class AssetManager(QMainWindow):
 
         left_layout.addWidget(self.left_tabs)
 
-        # Thêm Refresh button
         refresh_btn = QPushButton("Refresh")
         refresh_icon_path = os.path.join(self.icons_dir, "refresh_icon.png")
         if os.path.exists(refresh_icon_path):
@@ -368,7 +264,6 @@ class AssetManager(QMainWindow):
         right_layout = QVBoxLayout(right_widget)
         right_widget.setMinimumWidth(600)
 
-        # Thêm tabs cho Scenes và các tab khác
         self.tabs = QTabWidget()
         self.scenes_tab = QWidget()
         self.products_tab = QWidget()
@@ -388,7 +283,9 @@ class AssetManager(QMainWindow):
         self.tabs.addTab(self.libraries_tab, QIcon(libraries_icon_path) if os.path.exists(libraries_icon_path) else QIcon(), "Libraries")
         self.tabs.addTab(self.tasks_tab, QIcon(tasks_icon_path) if os.path.exists(tasks_icon_path) else QIcon(), "Tasks")
 
-        # Tab Scenes
+        self.tabs.tabBar().setMinimumSize(100, 30)
+        self.tabs.tabBar().setUsesScrollButtons(False)
+
         scenes_layout = QVBoxLayout(self.scenes_tab)
         self.scenes_list = QListWidget()
         self.scenes_list.setViewMode(QListWidget.ListMode)
@@ -397,10 +294,8 @@ class AssetManager(QMainWindow):
         self.scenes_list.customContextMenuRequested.connect(self.show_context_menu)
         scenes_layout.addWidget(self.scenes_list)
 
-        # Kết nối sự kiện double-click để mở file Blender
         self.scenes_list.itemDoubleClicked.connect(self.open_scene_in_blender)
 
-        # Tab Tasks (chứa asset_table)
         tasks_layout = QVBoxLayout(self.tasks_tab)
         self.asset_table = QTableWidget()
         self.asset_table.setColumnCount(5)
@@ -411,11 +306,9 @@ class AssetManager(QMainWindow):
         self.asset_table.setMinimumHeight(300)
         tasks_layout.addWidget(self.asset_table)
 
-        # Đảm bảo kích thước bảng không bị thu nhỏ
         self.asset_table.horizontalHeader().setStretchLastSection(True)
         self.asset_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
 
-        # Tab Media
         media_layout = QVBoxLayout(self.media_tab)
         self.video_widget = QVideoWidget()
         self.video_widget.setMinimumHeight(200)
@@ -424,7 +317,6 @@ class AssetManager(QMainWindow):
         self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
         self.media_player.setVideoOutput(self.video_widget)
 
-        # Nút điều khiển media
         media_controls = QHBoxLayout()
         play_btn = QPushButton("Play")
         play_btn.clicked.connect(self.media_player.play)
@@ -440,7 +332,6 @@ class AssetManager(QMainWindow):
 
         media_layout.addLayout(media_controls)
 
-        # Tab Products và Libraries (trống)
         products_layout = QVBoxLayout(self.products_tab)
         libraries_layout = QVBoxLayout(self.libraries_tab)
 
@@ -450,22 +341,19 @@ class AssetManager(QMainWindow):
         self.status_label.setStyleSheet("QLabel { background-color: #3c3f41; padding: 5px; color: #aaaaaa; }")
         right_layout.addWidget(self.status_label)
 
-        # Sử dụng QSplitter thay cho stretch factor
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(self.left_widget)
         self.splitter.addWidget(right_widget)
-        self.splitter.setStretchFactor(0, 1)  # Tỷ lệ ban đầu cho left_widget
-        self.splitter.setStretchFactor(1, 3)  # Tỷ lệ ban đầu cho right_widget
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 3)
         main_layout.addWidget(self.splitter)
 
-        # Khôi phục trạng thái splitter từ settings
         self.splitter.restoreState(self.settings.value("splitter_state", b""))
 
         main_layout.setSpacing(10)
         left_layout.setSpacing(10)
         right_layout.setSpacing(10)
 
-        # Gọi load_data_ui sau khi tất cả giao diện đã được khởi tạo
         self.load_data_ui()
 
     def toggle_section(self, asset_type):
@@ -504,8 +392,6 @@ class AssetManager(QMainWindow):
         self.save_data()
 
     def show_context_menu(self, position):
-        """Hiển thị menu chuột phải khi click vào item trong scenes_list, asset_lists, hoặc shot_list."""
-        # Xác định widget hiện tại
         widget = self.sender()
         if not widget:
             return
@@ -514,7 +400,6 @@ class AssetManager(QMainWindow):
         if not item:
             return
 
-        # Lấy dữ liệu dựa trên tab hiện tại
         if widget == self.scenes_list:
             display_name = item.data(Qt.UserRole)
             if not display_name or display_name == "No Blender files found in scenefiles directories.":
@@ -522,7 +407,7 @@ class AssetManager(QMainWindow):
             file_path = self.scene_file_paths.get(display_name)
             if not file_path:
                 return
-            folder_path = os.path.dirname(file_path)  # Thư mục chứa file Blender
+            folder_path = os.path.dirname(file_path)
         elif widget in self.asset_lists.values():
             asset_name = item.text()
             asset = next((a for a in self.assets if a["name"] == asset_name), None)
@@ -551,10 +436,9 @@ class AssetManager(QMainWindow):
             self.delete_file(folder_path, os.path.basename(folder_path) if os.path.isdir(folder_path) else os.path.basename(os.path.dirname(folder_path)))
 
     def open_in_explorer(self, file_path):
-        """Mở File Explorer tại thư mục chứa file hoặc thư mục asset/shot."""
         try:
             folder_path = os.path.dirname(file_path)
-            os.startfile(folder_path)  # Mở thư mục trong File Explorer
+            os.startfile(folder_path)
             message = f"Opened folder '{os.path.basename(folder_path)}' in Explorer..."
             if len(message) > 50:
                 message = message[:47] + "..."
@@ -566,27 +450,24 @@ class AssetManager(QMainWindow):
             self.status_label.setText(message)
 
     def copy_path(self, file_path):
-        """Sao chép đường dẫn của thư mục chứa file Blender vào clipboard."""
-        folder_path = os.path.dirname(file_path)  # Lấy thư mục chứa file
+        folder_path = os.path.dirname(file_path)
         clipboard = QApplication.clipboard()
-        clipboard.setText(folder_path)  # Sao chép đường dẫn thư mục
+        clipboard.setText(folder_path)
         message = f"Copied folder path of '{os.path.basename(file_path)}' to clipboard..."
         if len(message) > 50:
             message = message[:47] + "..."
         self.status_label.setText(message)
 
     def delete_file(self, folder_path, display_name):
-        """Xóa thư mục chứa file Blender hoặc toàn bộ thư mục asset/shot với xác nhận."""
         reply = QMessageBox.question(self, "Xác nhận xóa", 
                                     f"Bạn có chắc muốn xóa '{display_name}' và các file liên quan không? Hành động này không thể hoàn tác!",
                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
             try:
                 if os.path.isdir(folder_path):
-                    shutil.rmtree(folder_path)  # Xóa toàn bộ thư mục
+                    shutil.rmtree(folder_path)
                 else:
-                    os.remove(folder_path)  # Xóa file nếu không phải thư mục
-                # Cập nhật lại danh sách Scenes, Assets, hoặc Shots
+                    os.remove(folder_path)
                 self.load_scenes_list()
                 self.load_data_ui()
                 message = f"Deleted '{display_name}' and related files..."
@@ -600,117 +481,141 @@ class AssetManager(QMainWindow):
                 self.status_label.setText(message)
 
     def load_scenes_list(self):
-        """Quét và hiển thị danh sách các file .blend từ thư mục scenefiles của tất cả assets."""
-        self.scenes_list.clear()  # Xóa danh sách hiện tại
+        self.scenes_list.clear()
+        self.scene_file_paths.clear()
 
-        # Đường dẫn đến thư mục assets
-        assets_base_dir = os.path.join(self.project_path, "03_Production", "assets")
-        asset_types = ["characters", "props", "vfxs"]
+        if not self.selected_asset:
+            self.scenes_list.addItem("Please select an asset to view scenes.")
+            return
 
-        # Dictionary để lưu trữ đường dẫn file .blend tương ứng với tên hiển thị
-        self.scene_file_paths = {}
+        asset_name = self.selected_asset["name"]
+        asset_type = self.selected_asset["type"].lower()
+        asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}")
+        scenefiles_dir = os.path.join(asset_dir, "scenefiles")
+        thumbnail_path = os.path.join(asset_dir, "thumbnail.jpg")
 
-        for asset_type in asset_types:
-            type_dir = os.path.join(assets_base_dir, asset_type)
-            if not os.path.exists(type_dir):
-                continue
+        if not os.path.exists(scenefiles_dir):
+            self.scenes_list.addItem("No scenefiles directory found.")
+            return
 
-            for asset_name in os.listdir(type_dir):
-                asset_dir = os.path.join(type_dir, asset_name)
-                if not os.path.isdir(asset_dir):
-                    continue
+        for file_name in os.listdir(scenefiles_dir):
+            if file_name.endswith(".blend"):
+                file_path = os.path.join(scenefiles_dir, file_name)
+                display_name = f"{asset_name} - {file_name}"
 
-                # Đường dẫn đến thư mục scenefiles
-                scenefiles_dir = os.path.join(asset_dir, "scenefiles")
-                if not os.path.exists(scenefiles_dir):
-                    continue
+                # Lấy thông tin file
+                latest_version = "v001"
+                created_time = datetime.fromtimestamp(os.path.getctime(file_path)).strftime("%d/%m/%Y %H:%M")
+                creator = self.current_user["username"]
 
-                # Đường dẫn đến thumbnail
-                thumbnail_path = os.path.join(asset_dir, "thumbnail.jpg")
-                if not os.path.exists(thumbnail_path):
-                    thumbnail_path = self.default_thumbnail
+                # Tạo custom widget cho item (Card_item)
+                item_widget = QWidget()
+                item_widget.setObjectName("card-item")  # Đặt tên để áp dụng CSS
+                item_layout = QHBoxLayout(item_widget)
+                item_layout.setContentsMargins(10, 10, 10, 10)
+                item_layout.setSpacing(10)
 
-                # Quét các file .blend trong thư mục scenefiles
-                for file_name in os.listdir(scenefiles_dir):
-                    if file_name.endswith(".blend"):
-                        file_path = os.path.join(scenefiles_dir, file_name)
-                        # Tạo display name
-                        display_name = f"{asset_name} - {file_name}"
+                # Thêm sự kiện hover
+                def enter_event(event):
+                    item_widget.setStyleSheet("QWidget#card-item { background-color: #555555; }")
 
-                        # Lấy thông tin file
-                        scene_name = file_name
-                        latest_version = "v001"
-                        old_dir = os.path.join(scenefiles_dir, ".old")
-                        if os.path.exists(old_dir):
-                            old_files = [f for f in os.listdir(old_dir) if os.path.isfile(os.path.join(old_dir, f))]
-                            version_files = [f for f in old_files if f.startswith(f"{self.project_short}_{asset_name}_") and f.endswith(".blend")]
-                            if version_files:
-                                versions = []
-                                for f in version_files:
-                                    try:
-                                        version_str = f.split('_v')[-1].replace(".blend", "")
-                                        version_num = int(version_str)
-                                        versions.append(version_num)
-                                    except ValueError:
-                                        continue
-                                if versions:
-                                    max_version = max(versions)
-                                    latest_version = f"v{max_version + 1:03d}"
+                def leave_event(event):
+                    if item_widget != self.selected_scene_item_widget:  # Kiểm tra nếu không phải item được chọn
+                        item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; }")
 
-                        created_time = "Unknown"
-                        if os.path.exists(file_path):
-                            created_time = datetime.fromtimestamp(os.path.getctime(file_path)).strftime("%Y-%m-%d %H:%M:%S")
+                item_widget.enterEvent = enter_event
+                item_widget.leaveEvent = leave_event
 
-                        # Tạo custom widget cho item
-                        item_widget = QWidget()
-                        item_layout = QHBoxLayout(item_widget)
+                # Widget 1: Thumbnail
+                thumbnail_label = QLabel()
+                thumbnail_label.setObjectName("scene-thumbnail")
+                pixmap = QPixmap()
+                if os.path.exists(thumbnail_path):
+                    pixmap.load(thumbnail_path)
+                elif os.path.exists(self.default_thumbnail):
+                    pixmap.load(self.default_thumbnail)
+                if not pixmap.isNull():
+                    pixmap = pixmap.scaledToWidth(50, Qt.SmoothTransformation)
+                    thumbnail_label.setPixmap(pixmap)
+                thumbnail_label.setMinimumWidth(0)
+                thumbnail_label.setMaximumWidth(50)
+                thumbnail_label.setScaledContents(False)
+                item_layout.addWidget(thumbnail_label, stretch=1)
 
-                        # Thêm thumbnail
-                        thumbnail_label = QLabel()
-                        thumbnail_label.setFixedSize(50, 50)  # Kích thước nhỏ hơn so với trước (100x100)
-                        if thumbnail_path and os.path.exists(thumbnail_path):
-                            pixmap = QPixmap(thumbnail_path)
-                            if not pixmap.isNull():
-                                thumbnail_label.setPixmap(pixmap.scaled(50, 50, Qt.KeepAspectRatio))
-                            else:
-                                pixmap = QPixmap(self.default_thumbnail)
-                                thumbnail_label.setPixmap(pixmap.scaled(50, 50, Qt.KeepAspectRatio))
-                        else:
-                            pixmap = QPixmap(self.default_thumbnail)
-                            thumbnail_label.setPixmap(pixmap.scaled(50, 50, Qt.KeepAspectRatio))
-                        item_layout.addWidget(thumbnail_label)
+                # Widget 2: Nội dung (theo chiều dọc)
+                content_widget = QWidget()
+                content_layout = QVBoxLayout(content_widget)
+                content_layout.setContentsMargins(0, 0, 0, 0)
+                content_layout.setSpacing(5)
+                item_layout.addWidget(content_widget, stretch=9)
 
-                        # Thêm thông tin chi tiết
-                        info_label = QLabel(
-                            f"Scene: {scene_name}\n"
-                            f"Version: {latest_version}\n"
-                            f"Created: {created_time}"
-                        )
-                        info_label.setStyleSheet("QLabel { background-color: #3c3f41; padding: 5px; color: #ffffff; } QLabel:hover { background-color: #555555; }")
-                        item_layout.addWidget(info_label)
+                # Tiêu đề: Vuna v001
+                title_label = QLabel(f"{asset_name} {latest_version}")
+                title_label.setObjectName("scene-title")
+                content_layout.addWidget(title_label)
 
-                        # Tạo QListWidgetItem và gán widget
-                        item = QListWidgetItem(self.scenes_list)
-                        item.setSizeHint(item_widget.sizeHint())  # Đặt kích thước item theo widget
-                        self.scenes_list.setItemWidget(item, item_widget)
+                # Widget phụ: Thông tin phụ và người tạo (theo chiều ngang)
+                sub_widget = QWidget()
+                sub_layout = QHBoxLayout(sub_widget)
+                sub_layout.setContentsMargins(0, 0, 0, 0)
+                sub_layout.setSpacing(10)
 
-                        # Lưu display_name vào item để sử dụng khi double-click
-                        item.setData(Qt.UserRole, display_name)
+                # Thông tin phụ: Texturing và ngày giờ (theo chiều ngang)
+                info_widget = QWidget()
+                info_layout = QHBoxLayout(info_widget)
+                info_layout.setContentsMargins(0, 0, 0, 0)
+                info_layout.setSpacing(10)
 
-                        # Lưu đường dẫn file .blend để sử dụng khi double-click
-                        self.scene_file_paths[display_name] = file_path
+                stage = next((s for s in ["Modeling", "Texturing", "Rigging"] if f"_{s}.blend" in file_name), "Unknown")
+                stage_label = QLabel(stage)
+                stage_label.setObjectName("scene-stage")
+                info_layout.addWidget(stage_label)
+
+                date_label = QLabel(created_time)
+                date_label.setObjectName("scene-date")
+                info_layout.addWidget(date_label)
+
+                sub_layout.addWidget(info_widget)
+
+                # Tên người làm: admin (căn trái)
+                creator_label = QLabel(creator)
+                creator_label.setObjectName("scene-creator")
+                sub_layout.addWidget(creator_label, alignment=Qt.AlignLeft)
+
+                content_layout.addWidget(sub_widget)
+
+                # Tạo QListWidgetItem và gán widget
+                item = QListWidgetItem(self.scenes_list)
+                item.setSizeHint(item_widget.sizeHint())
+                self.scenes_list.setItemWidget(item, item_widget)
+
+                item.setData(Qt.UserRole, display_name)
+                self.scene_file_paths[display_name] = file_path
+
+                # Kết nối sự kiện click để cập nhật item được chọn
+                item.setSelected(False)
+                self.scenes_list.itemClicked.connect(self.on_scene_item_clicked)
 
         if self.scenes_list.count() == 0:
             self.scenes_list.addItem("No Blender files found in scenefiles directories.")
 
     def open_scene_in_blender(self, item):
-        """Mở file Blender khi double-click vào một item trong danh sách Scenes."""
         if not item:
             return
 
-        display_name = item.data(Qt.UserRole)  # Lấy display_name từ item
+        # Xóa border của item trước đó (nếu có)
+        if self.selected_scene_item_widget:
+            self.selected_scene_item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border: none; }")
+
+        self.selected_scene_item = item
+        self.selected_scene_item_widget = self.scenes_list.itemWidget(item)
+
+        display_name = item.data(Qt.UserRole)
         if not display_name or display_name == "No Blender files found in scenefiles directories.":
             return
+
+        # Áp dụng border màu xanh lam
+        self.selected_scene_item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; }")
 
         file_path = self.scene_file_paths.get(display_name)
         if not file_path or not os.path.exists(file_path):
@@ -746,10 +651,9 @@ class AssetManager(QMainWindow):
             self.status_label.setText(message)
 
     def switch_mode(self, mode):
-        pass  # Không cần thiết nữa vì tab sẽ tự xử lý chuyển đổi
+        pass
 
     def load_data_ui(self):
-        # Cập nhật Assets
         type_counts = {"Characters": 0, "Props": 0, "VFXs": 0}
         for asset in self.assets:
             asset_type = asset["type"]
@@ -787,24 +691,17 @@ class AssetManager(QMainWindow):
                         section_btn.setText(f"{asset_type} ({type_counts[asset_type]}) ►")
             self.asset_lists[asset_type].setVisible(self.section_states[asset_type])
 
-        # Cập nhật Shots
         if self.shot_list:
             self.shot_list.clear()
-
         for shot in self.shots:
             self.shot_list.addItem(shot["name"])
 
-        self.load_scenes_list()  # Cập nhật danh sách Scenes
+        self.load_scenes_list()
 
     def update_asset_table(self):
         self.asset_table.setRowCount(len(self.assets))
         status_options = ["To Do", "Inprogress", "Pending Review", "Done"]
-        status_colors = {
-            "To Do": "#ff5555",
-            "Inprogress": "#55aaff",
-            "Pending Review": "#ffaa00",
-            "Done": "#55ff55"
-        }
+        status_colors = {"To Do": "#ff5555", "Inprogress": "#55aaff", "Pending Review": "#ffaa00", "Done": "#55ff55"}
 
         for row, asset in enumerate(self.assets):
             name_item = QTableWidgetItem(asset["name"])
@@ -841,12 +738,7 @@ class AssetManager(QMainWindow):
 
     def on_status_changed(self, row, index):
         status_options = ["To Do", "Inprogress", "Pending Review", "Done"]
-        status_colors = {
-            "To Do": "#ff5555",
-            "Inprogress": "#55aaff",
-            "Pending Review": "#ffaa00",
-            "Done": "#55ff55"
-        }
+        status_colors = {"To Do": "#ff5555", "Inprogress": "#55aaff", "Pending Review": "#ffaa00", "Done": "#55ff55"}
         new_status = status_options[index]
         self.assets[row]["status"] = new_status
         self.save_data()
@@ -869,7 +761,6 @@ class AssetManager(QMainWindow):
             msg.exec_()
 
     def create_video_from_frames(self, frames_dir):
-        # Tìm tất cả các file ảnh trong thư mục playblast (hỗ trợ .png và .jpg)
         image_extensions = ("*.png", "*.jpg")
         image_files = []
         for ext in image_extensions:
@@ -878,36 +769,24 @@ class AssetManager(QMainWindow):
         if not image_files:
             return False
 
-        # Sử dụng regular expression để nhận diện và sắp xếp các file theo số thứ tự
-        # Mẫu tên file: <prefix>_<số thứ tự>.<extension>
-        # Ví dụ: frame_0001.png, v1_0001.png, v2_0002.jpg, ...
         def extract_frame_number(filename):
-            # Tìm số thứ tự trong tên file (ví dụ: 0001 trong v1_0001.png)
             match = re.search(r'_(\d+)\.(png|jpg)$', filename)
-            if match:
-                return int(match.group(1))  # Trả về số thứ tự dưới dạng số nguyên
-            return float('inf')  # Nếu không tìm thấy, xếp cuối danh sách
+            return int(match.group(1)) if match else float('inf')
 
-        # Sắp xếp các file theo số thứ tự
         image_files = sorted(image_files, key=extract_frame_number)
-
-        # Loại bỏ các file không khớp với mẫu (nếu có)
         image_files = [f for f in image_files if extract_frame_number(f) != float('inf')]
 
         if not image_files:
             return False
 
-        # Đọc ảnh đầu tiên để lấy kích thước
         frame = cv2.imread(image_files[0])
         if frame is None:
             return False
         height, width, layers = frame.shape
 
-        # Tạo video writer
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         video_writer = cv2.VideoWriter(self.temp_video_path, fourcc, 24.0, (width, height))
 
-        # Ghi từng frame vào video
         for image_file in image_files:
             frame = cv2.imread(image_file)
             if frame is None:
@@ -943,10 +822,9 @@ class AssetManager(QMainWindow):
                     self.media_player.stop()
                 return
 
-        # Dừng media player và xóa file cũ
         if self.media_player:
             self.media_player.stop()
-            self.media_player.setMedia(QMediaContent())  # Giải phóng file cũ
+            self.media_player.setMedia(QMediaContent())
 
         if os.path.exists(self.temp_video_path):
             try:
@@ -958,7 +836,6 @@ class AssetManager(QMainWindow):
                 self.status_label.setText(message)
                 return
 
-        # Tạo video từ chuỗi ảnh
         if self.create_video_from_frames(playblast_dir):
             self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.temp_video_path)))
             message = f"Loaded playblast from {playblast_dir}..."
@@ -967,7 +844,7 @@ class AssetManager(QMainWindow):
             self.status_label.setText(message)
         else:
             self.media_player.stop()
-            message = f"No valid frames found in {playblast_dir}. Expected format: <prefix>_<number>.(png|jpg), e.g., v1_0001.png..."
+            message = f"No valid frames found in {playblast_dir}. Expected format: <prefix>_<number>.(png|jpg)..."
             if len(message) > 50:
                 message = message[:47] + "..."
             self.status_label.setText(message)
@@ -976,14 +853,14 @@ class AssetManager(QMainWindow):
         if not item:
             return
         asset_name = item.text()
-        for row, asset in enumerate(self.assets):
-            if asset["name"] == asset_name:
-                asset_type = asset.get("type", "Unknown")
-                asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type.lower()}/{asset_name}")
-                self.current_playblast_dir = asset_dir
-                if self.tabs.currentWidget() == self.media_tab:  # Chỉ cập nhật nếu ở tab Media
-                    self.update_media_player()
-                break
+        self.selected_asset = next((a for a in self.assets if a["name"] == asset_name), None)
+        if self.selected_asset:
+            asset_type = self.selected_asset["type"].lower()
+            asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}")
+            self.current_playblast_dir = asset_dir
+            if self.tabs.currentWidget() == self.media_tab:
+                self.update_media_player()
+            self.load_scenes_list()
 
     def show_shot_details(self, item):
         if not item:
@@ -993,7 +870,7 @@ class AssetManager(QMainWindow):
             if shot["name"] == shot_name:
                 shot_dir = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
                 self.current_playblast_dir = shot_dir
-                if self.tabs.currentWidget() == self.media_tab:  # Chỉ cập nhật nếu ở tab Media
+                if self.tabs.currentWidget() == self.media_tab:
                     self.update_media_player()
                 break
 
@@ -1028,16 +905,26 @@ class AssetManager(QMainWindow):
                 os.makedirs(old_dir, exist_ok=True)
 
                 if not os.path.exists(latest_file):
-                    if os.path.exists(self.template_blend_file):
-                        shutil.copy(self.template_blend_file, latest_file)
-                    else:
-                        message = f"Error: Template file '{self.template_blend_file}' not found!..."
-                        if len(message) > 50:
-                            message = message[:47] + "..."
-                        self.status_label.setText(message)
-                        return
+                    if not os.path.exists(self.template_blend_file):
+                        # Tạo thư mục Resources nếu chưa tồn tại
+                        resources_dir = os.path.dirname(self.template_blend_file)
+                        os.makedirs(resources_dir, exist_ok=True)
+                        # Tạo file template.blend rỗng nếu không tồn tại
+                        try:
+                            with open(self.template_blend_file, 'wb') as f:
+                                f.write(b"BLENDER")  # Đầu file Blender hợp lệ
+                            message = f"Created template file at '{self.template_blend_file}'..."
+                            if len(message) > 50:
+                                message = message[:47] + "..."
+                            self.status_label.setText(message)
+                        except Exception as e:
+                            message = f"Error creating template file: {str(e)}..."
+                            if len(message) > 50:
+                                message = message[:47] + "..."
+                            self.status_label.setText(message)
+                            return
+                    shutil.copy(self.template_blend_file, latest_file)
 
-                # Sao chép thumbnail mặc định nếu chưa có
                 if not os.path.exists(thumbnail_path) and os.path.exists(self.default_thumbnail):
                     shutil.copy(self.default_thumbnail, thumbnail_path)
 
@@ -1054,14 +941,12 @@ class AssetManager(QMainWindow):
                 "stage": stage,
                 "status": "To Do",
                 "assignee": "",
-                "versions": [
-                    {
-                        "version": "v001",
-                        "description": "Initial version",
-                        "file_path": f"03_Production/assets/{asset_type_lower}/{asset_name}/scenefiles/{self.project_short}_{asset_name}_{stage}.blend",
-                        "thumbnail": f"03_Production/assets/{asset_type_lower}/{asset_name}/thumbnail.jpg"
-                    }
-                ]
+                "versions": [{
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": f"03_Production/assets/{asset_type_lower}/{asset_name}/scenefiles/{self.project_short}_{asset_name}_{stage}.blend",
+                    "thumbnail": f"03_Production/assets/{asset_type_lower}/{asset_name}/thumbnail.jpg"
+                }]
             }
             self.assets.append(new_asset)
             self.save_data()
@@ -1112,13 +997,11 @@ class AssetManager(QMainWindow):
 
             new_shot = {
                 "name": full_shot_name,
-                "versions": [
-                    {
-                        "version": "v001",
-                        "description": "Initial version",
-                        "file_path": f"03_Production/sequencer/{full_shot_name}/{full_shot_name}.blend"
-                    }
-                ]
+                "versions": [{
+                    "version": "v001",
+                    "description": "Initial version",
+                    "file_path": f"03_Production/sequencer/{full_shot_name}/{full_shot_name}.blend"
+                }]
             }
             self.shots.append(new_shot)
             self.save_data()
@@ -1198,18 +1081,51 @@ class AssetManager(QMainWindow):
                     "description": "Auto-refreshed version",
                     "file_path": f"03_Production/sequencer/{shot_name}/{shot_name}.blend"
                 }]
-                new_shot = {
-                    "name": shot_name,
-                    "versions": versions
-                }
+                new_shot = {"name": shot_name, "versions": versions}
                 new_shots.append(new_shot)
 
         self.assets = new_assets
         self.shots = new_shots
         self.save_data()
         self.load_data_ui()
-        self.load_scenes_list()  # Cập nhật danh sách Scenes
+        self.load_scenes_list()
         message = "Data refreshed successfully!..."
         if len(message) > 50:
             message = message[:47] + "..."
         self.status_label.setText(message)
+
+    def on_scene_item_clicked(self, item):
+        # Xóa border của item trước đó (nếu có)
+        if self.selected_scene_item_widget:
+            self.selected_scene_item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border: none; }")
+
+        self.selected_scene_item = item
+        self.selected_scene_item_widget = self.scenes_list.itemWidget(item)
+
+        display_name = item.data(Qt.UserRole)
+        if display_name and display_name != "No Blender files found in scenefiles directories.":
+            file_path = self.scene_file_paths.get(display_name)
+            if file_path:
+                folder_path = os.path.dirname(file_path)
+                self.status_label.setText(f"Selected: {os.path.basename(folder_path)}...")
+                # Áp dụng border màu xanh lam
+                self.selected_scene_item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; }")
+
+    def keyPressEvent(self, event):
+        if self.selected_scene_item:
+            display_name = self.selected_scene_item.data(Qt.UserRole)
+            if display_name and display_name != "No Blender files found in scenefiles directories.":
+                file_path = self.scene_file_paths.get(display_name)
+                if file_path:
+                    folder_path = os.path.dirname(file_path)
+                    modifiers = event.modifiers()
+                    if modifiers == Qt.ControlModifier:
+                        if event.key() == Qt.Key_X:
+                            self.delete_file(folder_path, os.path.basename(folder_path))
+                            self.selected_scene_item = None
+                            self.selected_scene_item_widget = None
+                        elif event.key() == Qt.Key_E:
+                            self.open_in_explorer(folder_path)
+                        elif event.key() == Qt.Key_C:
+                            self.copy_path(folder_path)
+        super().keyPressEvent(event)
