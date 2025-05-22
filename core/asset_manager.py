@@ -19,7 +19,7 @@ from PyQt5.QtCore import Qt, QSettings, QUrl, QEvent
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from utils.dialogs import AddAssetDialog, AddShotDialog
 
-BASE_DIR = "F:\GitHub\Vexapipe\Resources"
+BASE_DIR = "F:/GitHub/Vexapipe"
 
 class AssetManager(QMainWindow):
     def __init__(self, project_path, show_lobby_callback, current_user):
@@ -29,11 +29,13 @@ class AssetManager(QMainWindow):
         self.current_user = current_user
         self.project_name = os.path.basename(project_path)
         self.selected_asset = None
+        self.selected_shot = None
         
         self.pipeline_dir = os.path.join(self.project_path, "00_Pipeline")
         self.icons_dir = os.path.join(self.pipeline_dir, "icons")
         self.default_thumbnail = os.path.join(BASE_DIR, "Resources", "default_thumbnail.jpg")
         self.data_file = os.path.join(self.pipeline_dir, "data.json")
+        self.assets_dir = os.path.join(self.pipeline_dir, "assets")
         self.users_file = os.path.join(os.path.dirname(os.path.dirname(self.project_path)), "users.json")
         
         self.blender_path = "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe"
@@ -51,7 +53,7 @@ class AssetManager(QMainWindow):
 
         self.data = self.load_data()
         self.project_short = self.data.get("short", self.project_name)
-        self.assets = self.data.get("assets", [])
+        self.assets = self.load_assets()
         self.shots = self.data.get("shots", [])
 
         self.team_members = self.load_team_members()
@@ -88,10 +90,25 @@ class AssetManager(QMainWindow):
 
         self.scene_file_paths = {}
 
-        self.selected_scene_item = None  # Theo dõi item được chọn trong scenes_list
-        self.selected_scene_item_widget = None  # Theo dõi widget của item được chọn
+        self.selected_scene_item = None
+        self.selected_scene_item_widget = None
 
         self.init_ui()
+
+        # Khôi phục Asset đã chọn và hiển thị Scenes
+        selected_asset_name = self.settings.value("selected_asset", "")
+        if selected_asset_name:
+            self.selected_asset = next((a for a in self.assets if a["name"] == selected_asset_name), None)
+            if self.selected_asset:
+                for asset_type in self.asset_lists:
+                    asset_list = self.asset_lists[asset_type]
+                    if asset_list:  # Kiểm tra asset_list tồn tại
+                        items = [asset_list.item(i) for i in range(asset_list.count())]
+                        for item in items:
+                            if item and item.text() == selected_asset_name:
+                                asset_list.setCurrentItem(item)
+                                self.show_asset_details(item)
+                                break
 
         self.setStyleSheet("""
             QMainWindow { background-color: #2b2b2b; }
@@ -122,7 +139,7 @@ class AssetManager(QMainWindow):
         """)
 
     def _create_initial_structure(self):
-        folders = ["00_Pipeline", "01_Management", "02_Designs", "03_Production", "04_Resources"]
+        folders = ["00_Pipeline", "00_Pipeline/assets", "01_Management", "02_Designs", "03_Production", "04_Resources"]
         for folder in folders:
             folder_path = os.path.join(self.project_path, folder)
             os.makedirs(folder_path, exist_ok=True)
@@ -140,6 +157,15 @@ class AssetManager(QMainWindow):
         if self.splitter:
             self.settings.setValue("splitter_state", self.splitter.saveState())
         self.settings.setValue("AssetManager/geometry", self.saveGeometry())
+        # Lưu Asset hoặc Shot đã chọn
+        if self.selected_asset:
+            self.settings.setValue("selected_asset", self.selected_asset["name"])
+        else:
+            self.settings.remove("selected_asset")
+        if self.selected_shot:
+            self.settings.setValue("selected_shot", self.selected_shot["name"])
+        else:
+            self.settings.remove("selected_shot")
         super().closeEvent(event)
 
     def load_team_members(self):
@@ -153,17 +179,44 @@ class AssetManager(QMainWindow):
         if os.path.exists(self.data_file):
             with open(self.data_file, 'r') as f:
                 return json.load(f)
-        return {"assets": [], "shots": [], "section_states": {"Characters": True, "Props": True, "VFXs": True}, "shot_section_state": True, "content_section_state": True, "short": ""}
+        return {"shots": [], "section_states": {"Characters": True, "Props": True, "VFXs": True}, "shot_section_state": True, "content_section_state": True, "short": ""}
 
     def save_data(self):
         with open(self.data_file, 'w') as f:
-            self.data["assets"] = self.assets
             self.data["shots"] = self.shots
             self.data["section_states"] = self.section_states
             self.data["shot_section_state"] = self.shot_section_state
             self.data["content_section_state"] = self.content_section_state
             self.data["short"] = self.project_short
             json.dump(self.data, f, indent=4)
+
+    def load_assets(self):
+        assets = []
+        if not os.path.exists(self.assets_dir):
+            return assets
+        for asset_file in os.listdir(self.assets_dir):
+            if asset_file.endswith(".json"):
+                asset_path = os.path.join(self.assets_dir, asset_file)
+                try:
+                    with open(asset_path, 'r') as f:
+                        asset_data = json.load(f)
+                        assets.append(asset_data)
+                except Exception as e:
+                    print(f"Error loading asset {asset_file}: {str(e)}")
+        return assets
+
+    def save_asset(self, asset):
+        asset_file = os.path.join(self.assets_dir, f"{asset['name']}.json")
+        with open(asset_file, 'w') as f:
+            json.dump(asset, f, indent=4)
+
+    def delete_asset_file(self, asset_name):
+        asset_file = os.path.join(self.assets_dir, f"{asset_name}.json")
+        if os.path.exists(asset_file):
+            try:
+                os.remove(asset_file)
+            except Exception as e:
+                print(f"Error deleting asset file {asset_file}: {str(e)}")
 
     def init_ui(self):
         main_widget = QWidget()
@@ -190,6 +243,7 @@ class AssetManager(QMainWindow):
 
         self.left_tabs.addTab(self.assets_tab, QIcon(assets_icon_path) if os.path.exists(assets_icon_path) else QIcon(), "Assets")
         self.left_tabs.addTab(self.shots_tab, QIcon(shots_icon_path) if os.path.exists(shots_icon_path) else QIcon(), "Shots")
+        self.left_tabs.currentChanged.connect(self.on_tab_changed)
 
         self.left_tabs.tabBar().setMinimumSize(100, 30)
         self.left_tabs.tabBar().setUsesScrollButtons(False)
@@ -292,6 +346,7 @@ class AssetManager(QMainWindow):
         self.scenes_list.setSpacing(5)
         self.scenes_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.scenes_list.customContextMenuRequested.connect(self.show_context_menu)
+        self.scenes_list.itemSelectionChanged.connect(self.on_scene_selection_changed)
         scenes_layout.addWidget(self.scenes_list)
 
         self.scenes_list.itemDoubleClicked.connect(self.open_scene_in_blender)
@@ -355,6 +410,18 @@ class AssetManager(QMainWindow):
         right_layout.setSpacing(10)
 
         self.load_data_ui()
+
+        # Đảm bảo hiển thị Scenes nếu đang ở tab Assets
+        if self.left_tabs.currentIndex() == 0 and self.selected_asset:
+            for asset_type in self.asset_lists:
+                asset_list = self.asset_lists[asset_type]
+                if asset_list:
+                    items = [asset_list.item(i) for i in range(asset_list.count())]
+                    for item in items:
+                        if item and item.text() == self.selected_asset["name"]:
+                            asset_list.setCurrentItem(item)
+                            self.show_asset_details(item)
+                            break
 
     def toggle_section(self, asset_type):
         self.section_states[asset_type] = not self.section_states[asset_type]
@@ -433,11 +500,11 @@ class AssetManager(QMainWindow):
         elif action == copy_path:
             self.copy_path(folder_path)
         elif action == delete:
-            self.delete_file(folder_path, os.path.basename(folder_path) if os.path.isdir(folder_path) else os.path.basename(os.path.dirname(folder_path)))
+            self.delete_file(folder_path, os.path.basename(folder_path) if os.path.isdir(folder_path) else os.path.basename(os.path.dirname(folder_path)), widget, item)
 
     def open_in_explorer(self, file_path):
         try:
-            folder_path = os.path.dirname(file_path)
+            folder_path = os.path.dirname(file_path) if os.path.isfile(file_path) else file_path
             os.startfile(folder_path)
             message = f"Opened folder '{os.path.basename(folder_path)}' in Explorer..."
             if len(message) > 50:
@@ -450,15 +517,15 @@ class AssetManager(QMainWindow):
             self.status_label.setText(message)
 
     def copy_path(self, file_path):
-        folder_path = os.path.dirname(file_path)
+        folder_path = os.path.dirname(file_path) if os.path.isfile(file_path) else file_path
         clipboard = QApplication.clipboard()
         clipboard.setText(folder_path)
-        message = f"Copied folder path of '{os.path.basename(file_path)}' to clipboard..."
+        message = f"Copied folder path of '{os.path.basename(folder_path)}' to clipboard..."
         if len(message) > 50:
             message = message[:47] + "..."
         self.status_label.setText(message)
 
-    def delete_file(self, folder_path, display_name):
+    def delete_file(self, folder_path, display_name, widget=None, item=None):
         reply = QMessageBox.question(self, "Xác nhận xóa", 
                                     f"Bạn có chắc muốn xóa '{display_name}' và các file liên quan không? Hành động này không thể hoàn tác!",
                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -468,8 +535,27 @@ class AssetManager(QMainWindow):
                     shutil.rmtree(folder_path)
                 else:
                     os.remove(folder_path)
-                self.load_scenes_list()
-                self.load_data_ui()
+                
+                if widget in self.asset_lists.values():
+                    asset_name = item.text()
+                    self.delete_asset_file(asset_name)
+                    self.assets = [a for a in self.assets if a["name"] != asset_name]
+                    self.save_data()
+                    self.load_data_ui()
+                    if self.selected_asset and self.selected_asset["name"] == asset_name:
+                        self.selected_asset = None
+                        self.load_scenes_list()
+                elif widget == self.shot_list:
+                    shot_name = item.text()
+                    self.shots = [s for s in self.shots if s["name"] != shot_name]
+                    self.save_data()
+                    self.load_data_ui()
+                    if self.selected_shot and self.selected_shot["name"] == shot_name:
+                        self.selected_shot = None
+                        self.load_scenes_list()
+                else:
+                    self.load_scenes_list()
+                
                 message = f"Deleted '{display_name}' and related files..."
                 if len(message) > 50:
                     message = message[:47] + "..."
@@ -486,15 +572,22 @@ class AssetManager(QMainWindow):
         self.selected_scene_item = None
         self.selected_scene_item_widget = None
 
-        if not self.selected_asset:
-            self.scenes_list.addItem("Please select an asset to view scenes.")
+        if not self.selected_asset and not self.selected_shot:
+            self.scenes_list.addItem("Please select an asset or shot to view scenes.")
             return
 
-        asset_name = self.selected_asset["name"]
-        asset_type = self.selected_asset["type"].lower()
-        asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}")
-        scenefiles_dir = os.path.join(asset_dir, "scenefiles")
-        thumbnail_path = os.path.join(asset_dir, "thumbnail.jpg")
+        if self.selected_asset:
+            asset_name = self.selected_asset["name"]
+            asset_type = self.selected_asset["type"].lower()
+            asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}")
+            scenefiles_dir = os.path.join(asset_dir, "scenefiles")
+            thumbnail_path = os.path.join(asset_dir, "thumbnail.jpg")
+        elif self.selected_shot:
+            shot_name = self.selected_shot["name"]
+            asset_dir = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
+            scenefiles_dir = os.path.join(asset_dir, "scenefiles")
+            thumbnail_path = os.path.join(asset_dir, "thumbnail.jpg")
+            asset_name = shot_name
 
         if not os.path.exists(scenefiles_dir):
             self.scenes_list.addItem("No scenefiles directory found.")
@@ -505,12 +598,10 @@ class AssetManager(QMainWindow):
                 file_path = os.path.join(scenefiles_dir, file_name)
                 display_name = f"{asset_name} - {file_name}"
 
-                # Lấy thông tin file
                 latest_version = "v001"
                 created_time = datetime.fromtimestamp(os.path.getctime(file_path)).strftime("%d/%m/%Y %H:%M")
                 creator = self.current_user["username"]
 
-                # Tạo custom widget cho item (Card_item)
                 item_widget = QWidget()
                 item_widget.setObjectName("card-item")
                 item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; }")
@@ -520,7 +611,6 @@ class AssetManager(QMainWindow):
                 item_layout.setContentsMargins(10, 10, 10, 10)
                 item_layout.setSpacing(10)
 
-                # Thêm sự kiện hover
                 def enter_event(event, widget=item_widget):
                     if widget != self.selected_scene_item_widget:
                         widget.setStyleSheet("""
@@ -536,7 +626,6 @@ class AssetManager(QMainWindow):
                 item_widget.enterEvent = enter_event
                 item_widget.leaveEvent = leave_event
 
-                # Widget 1: Thumbnail
                 thumbnail_label = QLabel()
                 thumbnail_label.setObjectName("scene-thumbnail")
                 pixmap = QPixmap()
@@ -557,32 +646,28 @@ class AssetManager(QMainWindow):
                 thumbnail_label.setScaledContents(False)
                 item_layout.addWidget(thumbnail_label, stretch=1)
 
-                # Widget 2: Nội dung (theo chiều dọc)
                 content_widget = QWidget()
                 content_layout = QVBoxLayout(content_widget)
                 content_layout.setContentsMargins(0, 0, 0, 0)
                 content_layout.setSpacing(5)
                 item_layout.addWidget(content_widget, stretch=9)
 
-                # Tiêu đề: Vuna v001
                 title_label = QLabel(f"{asset_name}_{latest_version}")
                 title_label.setObjectName("scene-title")
                 title_label.setStyleSheet("font-size: 16px; font-weight: bold")
                 content_layout.addWidget(title_label)
 
-                # Widget phụ: Thông tin phụ và người tạo (theo chiều ngang)
                 sub_widget = QWidget()
                 sub_layout = QHBoxLayout(sub_widget)
                 sub_layout.setContentsMargins(0, 0, 0, 0)
                 sub_layout.setSpacing(10)
 
-                # Thông tin phụ: Texturing và ngày giờ (theo chiều ngang)
                 info_widget = QWidget()
                 info_layout = QHBoxLayout(info_widget)
                 info_layout.setContentsMargins(0, 0, 0, 0)
                 info_layout.setSpacing(10)
 
-                stage = next((s for s in ["Modeling", "Texturing", "Rigging"] if f"_{s}.blend" in file_name), "Unknown")
+                stage = next((s for s in ["Modeling", "Texturing", "Rigging"] if f"_{s}" in file_name or f"{s}.blend" in file_name), "Unknown")
                 stage_label = QLabel(stage)
                 stage_label.setObjectName("scene-stage")
                 info_layout.addWidget(stage_label)
@@ -593,14 +678,12 @@ class AssetManager(QMainWindow):
 
                 sub_layout.addWidget(info_widget)
 
-                # Tên người làm: admin (căn trái)
                 creator_label = QLabel(creator)
                 creator_label.setObjectName("scene-creator")
                 sub_layout.addWidget(creator_label, alignment=Qt.AlignLeft)
 
                 content_layout.addWidget(sub_widget)
 
-                # Tạo QListWidgetItem và gán widget
                 item = QListWidgetItem(self.scenes_list)
                 item.setSizeHint(item_widget.sizeHint())
                 self.scenes_list.setItemWidget(item, item_widget)
@@ -619,9 +702,13 @@ class AssetManager(QMainWindow):
         if not item:
             return
 
-        # Xóa border của item trước đó (nếu có)
         if self.selected_scene_item_widget:
-            self.selected_scene_item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border: none; }")
+            try:
+                self.selected_scene_item_widget.setStyleSheet("""
+                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
+                """)
+            except RuntimeError:
+                pass
 
         self.selected_scene_item = item
         self.selected_scene_item_widget = self.scenes_list.itemWidget(item)
@@ -630,8 +717,13 @@ class AssetManager(QMainWindow):
         if not display_name or display_name == "No Blender files found in scenefiles directories.":
             return
 
-        # Áp dụng border màu xanh lam
-        self.selected_scene_item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; }")
+        try:
+            self.selected_scene_item_widget.setStyleSheet("""
+                QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; }
+                QWidget#card-item * { background-color: #3c3f41; }
+            """)
+        except RuntimeError:
+            pass
 
         file_path = self.scene_file_paths.get(display_name)
         if not file_path or not os.path.exists(file_path):
@@ -709,10 +801,10 @@ class AssetManager(QMainWindow):
 
         if self.shot_list:
             self.shot_list.clear()
-        for shot in self.shots:
+        for shot in sorted(self.shots, key=lambda x: x["name"]):  # Sắp xếp shots theo tên
             self.shot_list.addItem(shot["name"])
 
-        self.load_scenes_list()
+        self.update_asset_table()
 
     def update_asset_table(self):
         self.asset_table.setRowCount(len(self.assets))
@@ -757,7 +849,7 @@ class AssetManager(QMainWindow):
         status_colors = {"To Do": "#ff5555", "Inprogress": "#55aaff", "Pending Review": "#ffaa00", "Done": "#55ff55"}
         new_status = status_options[index]
         self.assets[row]["status"] = new_status
-        self.save_data()
+        self.save_asset(self.assets[row])
         self.asset_table.item(row, 3).setBackground(QColor(status_colors[new_status]))
 
     def on_assignee_changed(self, row, index):
@@ -765,7 +857,7 @@ class AssetManager(QMainWindow):
         new_assignee = assignee_combo.currentText()
         old_assignee = self.assets[row].get("assignee", "")
         self.assets[row]["assignee"] = new_assignee
-        self.save_data()
+        self.save_asset(self.assets[row])
 
         if new_assignee and new_assignee == self.current_user["username"] and new_assignee != old_assignee:
             asset_name = self.assets[row]["name"]
@@ -870,10 +962,13 @@ class AssetManager(QMainWindow):
             return
         asset_name = item.text()
         self.selected_asset = next((a for a in self.assets if a["name"] == asset_name), None)
+        self.selected_shot = None
         if self.selected_asset:
             asset_type = self.selected_asset["type"].lower()
             asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}")
             self.current_playblast_dir = asset_dir
+            self.settings.setValue("selected_asset", asset_name)
+            self.settings.remove("selected_shot")
             if self.tabs.currentWidget() == self.media_tab:
                 self.update_media_player()
             self.load_scenes_list()
@@ -882,13 +977,48 @@ class AssetManager(QMainWindow):
         if not item:
             return
         shot_name = item.text()
-        for shot in self.shots:
-            if shot["name"] == shot_name:
-                shot_dir = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
-                self.current_playblast_dir = shot_dir
-                if self.tabs.currentWidget() == self.media_tab:
-                    self.update_media_player()
-                break
+        self.selected_shot = next((s for s in self.shots if s["name"] == shot_name), None)
+        self.selected_asset = None
+        if self.selected_shot:
+            shot_dir = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
+            self.current_playblast_dir = shot_dir
+            self.settings.setValue("selected_shot", shot_name)
+            self.settings.remove("selected_asset")
+            if self.tabs.currentWidget() == self.media_tab:
+                self.update_media_player()
+            self.load_scenes_list()
+
+    def on_tab_changed(self, index):
+        if index == 0:  # Assets tab
+            if self.selected_asset:
+                for asset_type in self.asset_lists:
+                    asset_list = self.asset_lists[asset_type]
+                    if asset_list:  # Kiểm tra asset_list tồn tại
+                        items = [asset_list.item(i) for i in range(asset_list.count())]
+                        for item in items:
+                            if item and item.text() == self.selected_asset["name"]:
+                                asset_list.setCurrentItem(item)
+                                self.show_asset_details(item)
+                                break
+            else:
+                self.scenes_list.clear()
+                self.scenes_list.addItem("Please select an asset to view scenes.")
+        elif index == 1:  # Shots tab
+            if not self.selected_shot and self.shot_list.count() > 0:
+                self.shot_list.setCurrentRow(0)
+                first_shot_item = self.shot_list.item(0)
+                if first_shot_item:
+                    self.show_shot_details(first_shot_item)
+            elif self.selected_shot:
+                items = [self.shot_list.item(i) for i in range(self.shot_list.count())]
+                for item in items:
+                    if item and item.text() == self.selected_shot["name"]:
+                        self.shot_list.setCurrentItem(item)
+                        self.show_shot_details(item)
+                        break
+            else:
+                self.scenes_list.clear()
+                self.scenes_list.addItem("Please select a shot to view scenes.")
 
     def add_asset(self):
         dialog = AddAssetDialog(self)
@@ -922,13 +1052,11 @@ class AssetManager(QMainWindow):
 
                 if not os.path.exists(latest_file):
                     if not os.path.exists(self.template_blend_file):
-                        # Tạo thư mục Resources nếu chưa tồn tại
                         resources_dir = os.path.dirname(self.template_blend_file)
                         os.makedirs(resources_dir, exist_ok=True)
-                        # Tạo file template.blend rỗng nếu không tồn tại
                         try:
                             with open(self.template_blend_file, 'wb') as f:
-                                f.write(b"BLENDER")  # Đầu file Blender hợp lệ
+                                f.write(b"BLENDER")
                             message = f"Created template file at '{self.template_blend_file}'..."
                             if len(message) > 50:
                                 message = message[:47] + "..."
@@ -965,8 +1093,20 @@ class AssetManager(QMainWindow):
                 }]
             }
             self.assets.append(new_asset)
-            self.save_data()
+            self.save_asset(new_asset)
             self.load_data_ui()
+            # Tự động chọn Asset mới
+            self.selected_asset = new_asset
+            self.selected_shot = None
+            self.settings.setValue("selected_asset", asset_name)
+            self.settings.remove("selected_shot")
+            for asset_list in self.asset_lists.values():
+                items = [asset_list.item(i) for i in range(asset_list.count())]
+                for item in items:
+                    if item and item.text() == asset_name:
+                        asset_list.setCurrentItem(item)
+                        self.show_asset_details(item)
+                        break
             message = f"Asset '{asset_name}' (Type: {asset_type}, Stage: {stage}) created successfully!..."
             if len(message) > 50:
                 message = message[:47] + "..."
@@ -984,14 +1124,17 @@ class AssetManager(QMainWindow):
                 self.status_label.setText(message)
                 return
 
-            full_shot_name = f"{self.project_short}_{shot_name}"
+            full_shot_name = shot_name
             shot_dir = os.path.join(self.project_path, f"03_Production/sequencer/{full_shot_name}")
-            old_dir = os.path.join(shot_dir, ".old")
+            scenefiles_dir = os.path.join(shot_dir, "scenefiles")
+            old_dir = os.path.join(scenefiles_dir, ".old")
             playblast_dir = os.path.join(shot_dir, "playblast")
-            latest_file = os.path.join(shot_dir, f"{full_shot_name}.blend")
+            latest_file = os.path.join(scenefiles_dir, f"{self.project_short}_{full_shot_name}.blend")
+            thumbnail_path = os.path.join(shot_dir, "thumbnail.jpg")
 
             try:
                 os.makedirs(shot_dir, exist_ok=True)
+                os.makedirs(scenefiles_dir, exist_ok=True)
                 os.makedirs(old_dir, exist_ok=True)
                 os.makedirs(playblast_dir, exist_ok=True)
 
@@ -999,11 +1142,26 @@ class AssetManager(QMainWindow):
                     if os.path.exists(self.template_blend_file):
                         shutil.copy(self.template_blend_file, latest_file)
                     else:
-                        message = f"Error: Template file '{self.template_blend_file}' not found!..."
-                        if len(message) > 50:
-                            message = message[:47] + "..."
-                        self.status_label.setText(message)
-                        return
+                        resources_dir = os.path.dirname(self.template_blend_file)
+                        os.makedirs(resources_dir, exist_ok=True)
+                        try:
+                            with open(self.template_blend_file, 'wb') as f:
+                                f.write(b"BLENDER")
+                            message = f"Created template file at '{self.template_blend_file}'..."
+                            if len(message) > 50:
+                                message = message[:47] + "..."
+                            self.status_label.setText(message)
+                        except Exception as e:
+                            message = f"Error creating template file: {str(e)}..."
+                            if len(message) > 50:
+                                message = message[:47] + "..."
+                            self.status_label.setText(message)
+                            return
+                        shutil.copy(self.template_blend_file, latest_file)
+
+                if not os.path.exists(thumbnail_path) and os.path.exists(self.default_thumbnail):
+                    shutil.copy(self.default_thumbnail, thumbnail_path)
+
             except Exception as e:
                 message = f"Error creating directory or files: {str(e)}..."
                 if len(message) > 50:
@@ -1016,12 +1174,23 @@ class AssetManager(QMainWindow):
                 "versions": [{
                     "version": "v001",
                     "description": "Initial version",
-                    "file_path": f"03_Production/sequencer/{full_shot_name}/{full_shot_name}.blend"
+                    "file_path": f"03_Production/sequencer/{full_shot_name}/scenefiles/{self.project_short}_{full_shot_name}.blend"
                 }]
             }
             self.shots.append(new_shot)
             self.save_data()
             self.load_data_ui()
+            # Tự động chọn Shot mới
+            self.selected_shot = new_shot
+            self.selected_asset = None
+            self.settings.setValue("selected_shot", full_shot_name)
+            self.settings.remove("selected_asset")
+            items = [self.shot_list.item(i) for i in range(self.shot_list.count())]
+            for item in items:
+                if item and item.text() == full_shot_name:
+                    self.shot_list.setCurrentItem(item)
+                    self.show_shot_details(item)
+                    break
             message = f"Shot '{full_shot_name}' created successfully!..."
             if len(message) > 50:
                 message = message[:47] + "..."
@@ -1058,9 +1227,14 @@ class AssetManager(QMainWindow):
                 if not os.path.isdir(asset_dir):
                     continue
 
-                existing_asset = next((asset for asset in self.assets if asset["name"] == asset_name and asset["type"].lower() == asset_type), None)
-                if existing_asset:
-                    new_assets.append(existing_asset)
+                asset_file = os.path.join(self.assets_dir, f"{asset_name}.json")
+                if os.path.exists(asset_file):
+                    try:
+                        with open(asset_file, 'r') as f:
+                            existing_asset = json.load(f)
+                            new_assets.append(existing_asset)
+                    except Exception as e:
+                        print(f"Error loading asset {asset_name}: {str(e)}")
                 else:
                     scenefiles_dir = os.path.join(asset_dir, "scenefiles")
                     if os.path.exists(scenefiles_dir):
@@ -1082,6 +1256,7 @@ class AssetManager(QMainWindow):
                                 "versions": versions
                             }
                             new_assets.append(new_asset)
+                            self.save_asset(new_asset)
 
         for shot_name in os.listdir(sequencer_dir):
             shot_dir = os.path.join(sequencer_dir, shot_name)
@@ -1092,19 +1267,22 @@ class AssetManager(QMainWindow):
             if existing_shot:
                 new_shots.append(existing_shot)
             else:
-                versions = [{
-                    "version": "v001",
-                    "description": "Auto-refreshed version",
-                    "file_path": f"03_Production/sequencer/{shot_name}/{shot_name}.blend"
-                }]
-                new_shot = {"name": shot_name, "versions": versions}
-                new_shots.append(new_shot)
+                scenefiles_dir = os.path.join(shot_dir, "scenefiles")
+                if os.path.exists(scenefiles_dir):
+                    blend_files = [f for f in os.listdir(scenefiles_dir) if f.endswith(".blend")]
+                    if blend_files:
+                        versions = [{
+                            "version": "v001",
+                            "description": "Auto-refreshed version",
+                            "file_path": f"03_Production/sequencer/{shot_name}/scenefiles/{self.project_short}_{shot_name}.blend"
+                        }]
+                        new_shot = {"name": shot_name, "versions": versions}
+                        new_shots.append(new_shot)
 
         self.assets = new_assets
         self.shots = new_shots
         self.save_data()
         self.load_data_ui()
-        self.load_scenes_list()
         message = "Data refreshed successfully!..."
         if len(message) > 50:
             message = message[:47] + "..."
@@ -1136,6 +1314,19 @@ class AssetManager(QMainWindow):
                         """)
                     except RuntimeError:
                         pass
+
+    def on_scene_selection_changed(self):
+        selected_items = self.scenes_list.selectedItems()
+        if not selected_items and self.selected_scene_item_widget:
+            try:
+                self.selected_scene_item_widget.setStyleSheet("""
+                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
+                """)
+                self.selected_scene_item = None
+                self.selected_scene_item_widget = None
+                self.status_label.setText("No scene selected.")
+            except RuntimeError as e:
+                print(f"RuntimeError: {str(e)}")
 
     def keyPressEvent(self, event):
         if self.selected_scene_item:
