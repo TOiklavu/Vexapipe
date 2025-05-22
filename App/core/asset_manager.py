@@ -124,6 +124,7 @@ class AssetManager(QMainWindow):
                 padding: 8px;
                 font-family: 'Arial';
                 font-size: 12px;
+                text-align: center;  /* Căn giữa chữ cho tất cả tab */
             }
             QTabBar::tab:selected {
                 background-color: #4a90e2;
@@ -275,6 +276,7 @@ class AssetManager(QMainWindow):
         left_layout = QVBoxLayout(self.left_widget)
         self.left_widget.setMinimumWidth(300)
         
+        # Thêm Home button
         home_btn = QPushButton("Home")
         home_icon_path = os.path.join(self.icons_dir, "home_icon.png")
         if os.path.exists(home_icon_path):
@@ -282,17 +284,19 @@ class AssetManager(QMainWindow):
         home_btn.clicked.connect(self.show_lobby_callback)
         left_layout.addWidget(home_btn)
 
-        # Thêm section Assets
-        assets_section_btn = QPushButton("Assets")
-        assets_section_btn.setObjectName("sectionButton")
-        down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-        if os.path.exists(down_arrow_path):
-            assets_section_btn.setIcon(QIcon(down_arrow_path))
-        else:
-            assets_section_btn.setText("Assets ▼")
-        assets_section_btn.clicked.connect(lambda: self.toggle_section_group("Assets"))
-        left_layout.addWidget(assets_section_btn)
+        # Tạo QTabWidget cho Left-bar
+        self.left_tabs = QTabWidget()
+        self.assets_tab = QWidget()
+        self.shots_tab = QWidget()
 
+        assets_icon_path = os.path.join(self.icons_dir, "assets_icon.png")
+        shots_icon_path = os.path.join(self.icons_dir, "shots_icon.png")
+
+        self.left_tabs.addTab(self.assets_tab, QIcon(assets_icon_path) if os.path.exists(assets_icon_path) else QIcon(), "Assets")
+        self.left_tabs.addTab(self.shots_tab, QIcon(shots_icon_path) if os.path.exists(shots_icon_path) else QIcon(), "Shots")
+
+        # Tab Assets
+        assets_layout = QVBoxLayout(self.assets_tab)
         self.assets_widget = QWidget()
         self.assets_layout = QVBoxLayout(self.assets_widget)
         self.assets_layout.setContentsMargins(10, 0, 0, 0)
@@ -324,19 +328,10 @@ class AssetManager(QMainWindow):
         self.add_asset_btn.clicked.connect(self.add_asset)
         self.assets_layout.addWidget(self.add_asset_btn)
 
-        left_layout.addWidget(self.assets_widget)
+        assets_layout.addWidget(self.assets_widget)
 
-        # Thêm section Shots
-        shots_section_btn = QPushButton("Shots")
-        shots_section_btn.setObjectName("sectionButton")
-        down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-        if os.path.exists(down_arrow_path):
-            shots_section_btn.setIcon(QIcon(down_arrow_path))
-        else:
-            shots_section_btn.setText("Shots ▼")
-        shots_section_btn.clicked.connect(lambda: self.toggle_section_group("Shots"))
-        left_layout.addWidget(shots_section_btn)
-
+        # Tab Shots
+        shots_layout = QVBoxLayout(self.shots_tab)
         self.shots_widget = QWidget()
         self.shots_layout = QVBoxLayout(self.shots_widget)
         self.shots_layout.setContentsMargins(10, 0, 0, 0)
@@ -357,8 +352,11 @@ class AssetManager(QMainWindow):
         self.add_shot_btn.clicked.connect(self.add_shot)
         self.shots_layout.addWidget(self.add_shot_btn)
 
-        left_layout.addWidget(self.shots_widget)
+        shots_layout.addWidget(self.shots_widget)
 
+        left_layout.addWidget(self.left_tabs)
+
+        # Thêm Refresh button
         refresh_btn = QPushButton("Refresh")
         refresh_icon_path = os.path.join(self.icons_dir, "refresh_icon.png")
         if os.path.exists(refresh_icon_path):
@@ -504,52 +502,6 @@ class AssetManager(QMainWindow):
 
         self.data["section_states"] = self.section_states
         self.save_data()
-
-    def toggle_section_group(self, group):
-        if group == "Assets":
-            self.assets_widget.setVisible(not self.assets_widget.isVisible())
-            if self.assets_widget.isVisible():
-                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-                if os.path.exists(down_arrow_path):
-                    for btn in self.left_widget.findChildren(QPushButton):
-                        if btn.text() == "Assets":
-                            btn.setIcon(QIcon(down_arrow_path))
-                else:
-                    for btn in self.left_widget.findChildren(QPushButton):
-                        if btn.text() == "Assets":
-                            btn.setText("Assets ▼")
-            else:
-                right_arrow_path = os.path.join(self.icons_dir, "right_arrow.png")
-                if os.path.exists(right_arrow_path):
-                    for btn in self.left_widget.findChildren(QPushButton):
-                        if btn.text() == "Assets":
-                            btn.setIcon(QIcon(right_arrow_path))
-                else:
-                    for btn in self.left_widget.findChildren(QPushButton):
-                        if btn.text() == "Assets":
-                            btn.setText("Assets ►")
-        elif group == "Shots":
-            self.shots_widget.setVisible(not self.shots_widget.isVisible())
-            if self.shots_widget.isVisible():
-                down_arrow_path = os.path.join(self.icons_dir, "down_arrow.png")
-                if os.path.exists(down_arrow_path):
-                    for btn in self.left_widget.findChildren(QPushButton):
-                        if btn.text() == "Shots":
-                            btn.setIcon(QIcon(down_arrow_path))
-                else:
-                    for btn in self.left_widget.findChildren(QPushButton):
-                        if btn.text() == "Shots":
-                            btn.setText("Shots ▼")
-            else:
-                right_arrow_path = os.path.join(self.icons_dir, "right_arrow.png")
-                if os.path.exists(right_arrow_path):
-                    for btn in self.left_widget.findChildren(QPushButton):
-                        if btn.text() == "Shots":
-                            btn.setIcon(QIcon(right_arrow_path))
-                else:
-                    for btn in self.left_widget.findChildren(QPushButton):
-                        if btn.text() == "Shots":
-                            btn.setText("Shots ►")
 
     def show_context_menu(self, position):
         """Hiển thị menu chuột phải khi click vào item trong scenes_list, asset_lists, hoặc shot_list."""
