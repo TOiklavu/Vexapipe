@@ -10,7 +10,7 @@ from PyQt5.QtCore import Qt, QSize, QSettings
 from core.asset_manager import AssetManager
 from utils.dialogs import AddProjectDialog, LoginDialog
 
-BASE_DIR = "D:/OneDrive/Desktop/Projects/Vexapipe/App"
+BASE_DIR = "F:\GitHub\Vexapipe"
 RESOURCES_DIR = os.path.join(BASE_DIR, "Resources")
 PROJECT_DATA_DIR = os.path.join(RESOURCES_DIR, "ProjectData")
 PROJECT_LOCATIONS_FILE = os.path.join(BASE_DIR, "project_locations.json")

@@ -19,7 +19,7 @@ from PyQt5.QtCore import Qt, QSettings, QUrl, QEvent
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from utils.dialogs import AddAssetDialog, AddShotDialog
 
-BASE_DIR = "D:/OneDrive/Desktop/Projects/Vexapine/App"
+BASE_DIR = "F:\GitHub\Vexapipe\Resources"
 
 class AssetManager(QMainWindow):
     def __init__(self, project_path, show_lobby_callback, current_user):
