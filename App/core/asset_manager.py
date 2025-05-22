@@ -115,7 +115,7 @@ class AssetManager(QMainWindow):
             QComboBox { background-color: #3c3f41; color: #ffffff; border: 1px solid #555555; padding: 3px; }
             QComboBox::drop-down { border: none; }
             .scene-title { font-weight: bold; font-size: 18px; }
-            .scene-stage { background-color: red; border-radius: 3px; padding: 2px 8px; margin: 2px 0; display: inline-block; }
+            .scene-stage { border-radius: 3px; padding: 2px 8px; margin: 2px 0; display: inline-block; }
             .scene-date { font-size: 14px; margin-left: 10px; }
             .scene-creator { font-size: 14px; }
             .scene-thumbnail { max-width: 10%; height: auto; }
@@ -483,6 +483,8 @@ class AssetManager(QMainWindow):
     def load_scenes_list(self):
         self.scenes_list.clear()
         self.scene_file_paths.clear()
+        self.selected_scene_item = None
+        self.selected_scene_item_widget = None
 
         if not self.selected_asset:
             self.scenes_list.addItem("Please select an asset to view scenes.")
@@ -510,18 +512,26 @@ class AssetManager(QMainWindow):
 
                 # Tạo custom widget cho item (Card_item)
                 item_widget = QWidget()
-                item_widget.setObjectName("card-item")  # Đặt tên để áp dụng CSS
+                item_widget.setObjectName("card-item")
+                item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; }")
+                item_widget.setMouseTracking(True)
+
                 item_layout = QHBoxLayout(item_widget)
                 item_layout.setContentsMargins(10, 10, 10, 10)
                 item_layout.setSpacing(10)
 
                 # Thêm sự kiện hover
-                def enter_event(event):
-                    item_widget.setStyleSheet("QWidget#card-item { background-color: #555555; }")
+                def enter_event(event, widget=item_widget):
+                    if widget != self.selected_scene_item_widget:
+                        widget.setStyleSheet("""
+                            QWidget#card-item, QWidget#card-item * { background-color: #555555; }
+                        """)
 
-                def leave_event(event):
-                    if item_widget != self.selected_scene_item_widget:  # Kiểm tra nếu không phải item được chọn
-                        item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; }")
+                def leave_event(event, widget=item_widget):
+                    if widget != self.selected_scene_item_widget:
+                        widget.setStyleSheet("""
+                            QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; }
+                        """)
 
                 item_widget.enterEvent = enter_event
                 item_widget.leaveEvent = leave_event
@@ -537,6 +547,11 @@ class AssetManager(QMainWindow):
                 if not pixmap.isNull():
                     pixmap = pixmap.scaledToWidth(50, Qt.SmoothTransformation)
                     thumbnail_label.setPixmap(pixmap)
+                else:
+                    message = f"Warning: No valid thumbnail found at {thumbnail_path} or {self.default_thumbnail}..."
+                    if len(message) > 50:
+                        message = message[:47] + "..."
+                    self.status_label.setText(message)
                 thumbnail_label.setMinimumWidth(0)
                 thumbnail_label.setMaximumWidth(50)
                 thumbnail_label.setScaledContents(False)
@@ -550,8 +565,9 @@ class AssetManager(QMainWindow):
                 item_layout.addWidget(content_widget, stretch=9)
 
                 # Tiêu đề: Vuna v001
-                title_label = QLabel(f"{asset_name} {latest_version}")
+                title_label = QLabel(f"{asset_name}_{latest_version}")
                 title_label.setObjectName("scene-title")
+                title_label.setStyleSheet("font-size: 16px; font-weight: bold")
                 content_layout.addWidget(title_label)
 
                 # Widget phụ: Thông tin phụ và người tạo (theo chiều ngang)
@@ -592,9 +608,9 @@ class AssetManager(QMainWindow):
                 item.setData(Qt.UserRole, display_name)
                 self.scene_file_paths[display_name] = file_path
 
-                # Kết nối sự kiện click để cập nhật item được chọn
                 item.setSelected(False)
-                self.scenes_list.itemClicked.connect(self.on_scene_item_clicked)
+
+        self.scenes_list.itemClicked.connect(self.on_scene_item_clicked)
 
         if self.scenes_list.count() == 0:
             self.scenes_list.addItem("No Blender files found in scenefiles directories.")
@@ -1095,9 +1111,13 @@ class AssetManager(QMainWindow):
         self.status_label.setText(message)
 
     def on_scene_item_clicked(self, item):
-        # Xóa border của item trước đó (nếu có)
         if self.selected_scene_item_widget:
-            self.selected_scene_item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border: none; }")
+            try:
+                self.selected_scene_item_widget.setStyleSheet("""
+                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
+                """)
+            except RuntimeError:
+                pass
 
         self.selected_scene_item = item
         self.selected_scene_item_widget = self.scenes_list.itemWidget(item)
@@ -1108,8 +1128,14 @@ class AssetManager(QMainWindow):
             if file_path:
                 folder_path = os.path.dirname(file_path)
                 self.status_label.setText(f"Selected: {os.path.basename(folder_path)}...")
-                # Áp dụng border màu xanh lam
-                self.selected_scene_item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; }")
+                if self.selected_scene_item_widget:
+                    try:
+                        self.selected_scene_item_widget.setStyleSheet("""
+                            QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; }
+                            QWidget#card-item * { background-color: #3c3f41; }
+                        """)
+                    except RuntimeError:
+                        pass
 
     def keyPressEvent(self, event):
         if self.selected_scene_item:
