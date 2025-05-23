@@ -5,19 +5,13 @@ import time
 import shutil
 import glob
 import re
-import cv2
-import sip
-import numpy as np
-import tempfile
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
                              QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget, 
                              QHeaderView, QMenu, QApplication, QSplitter, QLineEdit, QFormLayout, QDialog)
-from PyQt5.QtMultimediaWidgets import QVideoWidget
 from PyQt5.QtGui import QPixmap, QIcon, QColor, QCursor, QFont
-from PyQt5.QtCore import Qt, QSettings, QUrl, QEvent, QPoint
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+from PyQt5.QtCore import Qt, QSettings, QEvent, QPoint
 
 BASE_DIR = "F:/GitHub/Vexapipe"
 
@@ -87,9 +81,6 @@ class AssetManager(QMainWindow):
         self.blender_path = "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe"
         self.template_blend_file = os.path.join(BASE_DIR, "Resources", "template.blend")
         
-        self.temp_video_fd, self.temp_video_path = tempfile.mkstemp(suffix=".mp4")
-        os.close(self.temp_video_fd)
-
         self.setWindowTitle(f"Blender Asset Manager - {self.project_name} (Logged in as {self.current_user['username']})")
         
         self._create_initial_structure()
@@ -103,8 +94,6 @@ class AssetManager(QMainWindow):
         self.shots = self.data.get("shots", [])
 
         self.team_members = self.load_team_members()
-
-        self.current_playblast_dir = None
 
         self.section_states = {
             "Characters": True,
@@ -126,18 +115,15 @@ class AssetManager(QMainWindow):
         self.splitter = None
 
         self.current_mode = "Assets"
-        self.assets_btn = None
-        self.shots_btn = None
-        self.content_widget = None
-        self.content_layout = None
-
-        self.media_player = None
-        self.video_widget = None
+        self.products_list = None
 
         self.scene_file_paths = {}
+        self.product_file_paths = {}
 
         self.selected_scene_item = None
         self.selected_scene_item_widget = None
+        self.selected_product_item = None
+        self.selected_product_item_widget = None
 
         self.init_ui()
 
@@ -162,8 +148,7 @@ class AssetManager(QMainWindow):
                 font-size: 14px; 
             }
             QListWidget#shotList::item:selected { 
-                background-color: #4a90e2; 
-            }
+                background-color: #4a90e2; }
             QListWidget#shotList::item:hover { 
                 background-color: #555555; }
             QTabWidget::pane { border: 1px solid #555555; background-color: #3c3f41; }
@@ -182,11 +167,12 @@ class AssetManager(QMainWindow):
             QTableWidget::item:selected { background-color: #4a90e2; }
             QComboBox { background-color: #3c3f41; color: #ffffff; border: 1px solid #555555; padding: 3px; }
             QComboBox::drop-down { border: none; }
-            .scene-title { font-weight: bold; font-size: 18px; }
-            .scene-stage { border-radius: 3px; padding: 2px 8px; margin: 2px 0; display: inline-block; }
-            .scene-date { font-size: 14px; margin-left: 10px; }
+            .project-title, .scene-title, .product-title { font-weight: bold; font-size: 16px; }
+            .project-info, .scene-stage, .product-version { font-size: 14px; }
+            .scene-date, .product-format { font-size: 14px; }
             .scene-creator { font-size: 14px; }
-            .scene-thumbnail { max-width: 10%; height: auto; }
+            .project-thumbnail, .scene-thumbnail, .product-thumbnail { max-width: 100px; height: auto; }
+            QWidget#card-item { border-radius: 5px; padding: 10px; }
         """)
 
     def _create_initial_structure(self):
@@ -196,15 +182,6 @@ class AssetManager(QMainWindow):
             os.makedirs(folder_path, exist_ok=True)
 
     def closeEvent(self, event):
-        if self.media_player:
-            self.media_player.stop()
-            self.media_player.setMedia(QMediaContent())
-            self.media_player.setVideoOutput(None)
-        if os.path.exists(self.temp_video_path):
-            try:
-                os.remove(self.temp_video_path)
-            except PermissionError:
-                self.status_label.setText(f"Warning: Could not delete {self.temp_video_path}...")
         if self.splitter:
             self.settings.setValue("splitter_state", self.splitter.saveState())
         self.settings.setValue("AssetManager/geometry", self.saveGeometry())
@@ -423,6 +400,7 @@ class AssetManager(QMainWindow):
 
         self.tabs.tabBar().setMinimumSize(100, 30)
         self.tabs.tabBar().setUsesScrollButtons(False)
+        self.tabs.currentChanged.connect(self.on_right_tab_changed)
 
         scenes_layout = QVBoxLayout(self.scenes_tab)
         self.scenes_list = QListWidget()
@@ -435,6 +413,16 @@ class AssetManager(QMainWindow):
 
         self.scenes_list.itemDoubleClicked.connect(self.open_scene_in_blender)
         self.scenes_list.viewport().installEventFilter(self)
+
+        products_layout = QVBoxLayout(self.products_tab)
+        self.products_list = QListWidget()
+        self.products_list.setViewMode(QListWidget.ListMode)
+        self.products_list.setSpacing(5)
+        self.products_list.itemSelectionChanged.connect(self.on_product_selection_changed)
+        products_layout.addWidget(self.products_list)
+
+        media_layout = QVBoxLayout(self.media_tab)
+        # Để trống tab Media
 
         tasks_layout = QVBoxLayout(self.tasks_tab)
         self.asset_table = QTableWidget()
@@ -449,30 +437,6 @@ class AssetManager(QMainWindow):
         self.asset_table.horizontalHeader().setStretchLastSection(True)
         self.asset_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
 
-        media_layout = QVBoxLayout(self.media_tab)
-        self.video_widget = QVideoWidget()
-        self.video_widget.setMinimumHeight(200)
-        media_layout.addWidget(self.video_widget)
-
-        self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
-        self.media_player.setVideoOutput(self.video_widget)
-
-        media_controls = QHBoxLayout()
-        play_btn = QPushButton("Play")
-        play_btn.clicked.connect(self.media_player.play)
-        media_controls.addWidget(play_btn)
-
-        pause_btn = QPushButton("Pause")
-        pause_btn.clicked.connect(self.media_player.pause)
-        media_controls.addWidget(pause_btn)
-
-        stop_btn = QPushButton("Stop")
-        stop_btn.clicked.connect(self.media_player.stop)
-        media_controls.addWidget(stop_btn)
-
-        media_layout.addLayout(media_controls)
-
-        products_layout = QVBoxLayout(self.products_tab)
         libraries_layout = QVBoxLayout(self.libraries_tab)
 
         right_layout.addWidget(self.tabs)
@@ -529,6 +493,21 @@ class AssetManager(QMainWindow):
                         self.status_label.setText("No scene selected.")
                     except RuntimeError as e:
                         print(f"RuntimeError in eventFilter: {str(e)}")
+        elif source == self.products_list.viewport() and event.type() == QEvent.MouseButtonPress:
+            pos = event.pos()
+            item = self.products_list.itemAt(pos)
+            if not item:
+                self.products_list.clearSelection()
+                if self.selected_product_item_widget:
+                    try:
+                        self.selected_product_item_widget.setStyleSheet("""
+                            QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
+                        """)
+                        self.selected_product_item = None
+                        self.selected_product_item_widget = None
+                        self.status_label.setText("No product selected.")
+                    except RuntimeError as e:
+                        print(f"RuntimeError in eventFilter: {str(e)}")
         return super().eventFilter(source, event)
 
     def toggle_section(self, asset_type):
@@ -575,7 +554,6 @@ class AssetManager(QMainWindow):
         menu = QMenu()
 
         if widget == self.scenes_list and not item:
-            # Click vào khoảng trống trong scenes_list
             if self.selected_asset:
                 asset_name = self.selected_asset["name"]
                 asset_type = self.selected_asset["type"].lower()
@@ -609,7 +587,6 @@ class AssetManager(QMainWindow):
                     vfx_action = menu.addAction("VFX")
                     vfx_action.triggered.connect(lambda: self.create_scene_file("VFX"))
             else:
-                # Không có asset hoặc shot được chọn, thoát sớm để tránh crash
                 return
 
             if not menu.isEmpty():
@@ -628,7 +605,7 @@ class AssetManager(QMainWindow):
             display_name_for_delete = os.path.basename(file_path)
         elif widget in self.asset_lists.values():
             if item is None:
-                return  # Thoát sớm nếu click vào khoảng trống
+                return
             asset_name = item.text()
             asset = next((a for a in self.assets if a["name"] == asset_name), None)
             if not asset:
@@ -639,7 +616,7 @@ class AssetManager(QMainWindow):
             display_name_for_delete = asset_name
         elif widget == self.shot_list:
             if item is None:
-                return  # Thoát sớm nếu click vào khoảng trống
+                return
             shot_name = item.text()
             folder_path = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
             path_for_delete = folder_path
@@ -829,7 +806,7 @@ class AssetManager(QMainWindow):
 
             item_widget = QWidget()
             item_widget.setObjectName("card-item")
-            item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; }")
+            item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border-radius: 5px; padding: 10px; }")
             item_widget.setMouseTracking(True)
 
             item_layout = QHBoxLayout(item_widget)
@@ -839,13 +816,15 @@ class AssetManager(QMainWindow):
             def enter_event(event, widget=item_widget):
                 if widget != self.selected_scene_item_widget:
                     widget.setStyleSheet("""
-                        QWidget#card-item, QWidget#card-item * { background-color: #555555; }
+                        QWidget#card-item { background-color: #555555; border-radius: 5px; padding: 10px; }
+                        QWidget#card-item * { background-color: #555555; }
                     """)
 
             def leave_event(event, widget=item_widget):
                 if widget != self.selected_scene_item_widget:
                     widget.setStyleSheet("""
-                        QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; }
+                        QWidget#card-item { background-color: #3c3f41; border-radius: 5px; padding: 10px; }
+                        QWidget#card-item * { background-color: #3c3f41; }
                     """)
 
             item_widget.enterEvent = enter_event
@@ -859,7 +838,7 @@ class AssetManager(QMainWindow):
             elif os.path.exists(self.default_thumbnail):
                 pixmap.load(self.default_thumbnail)
             if not pixmap.isNull():
-                pixmap = pixmap.scaledToWidth(50, Qt.SmoothTransformation)
+                pixmap = pixmap.scaledToWidth(100, Qt.SmoothTransformation)
                 thumbnail_label.setPixmap(pixmap)
             else:
                 message = f"Warning: No valid thumbnail found at {thumbnail_path} or {self.default_thumbnail}..."
@@ -867,7 +846,7 @@ class AssetManager(QMainWindow):
                     message = message[:47] + "..."
                 self.status_label.setText(message)
             thumbnail_label.setMinimumWidth(0)
-            thumbnail_label.setMaximumWidth(50)
+            thumbnail_label.setMaximumWidth(100)
             thumbnail_label.setScaledContents(False)
             item_layout.addWidget(thumbnail_label, stretch=1)
 
@@ -879,7 +858,7 @@ class AssetManager(QMainWindow):
 
             title_label = QLabel(stage)
             title_label.setObjectName("scene-title")
-            title_label.setStyleSheet("font-size: 16px; font-weight: bold")
+            title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
             content_layout.addWidget(title_label)
 
             sub_widget = QWidget()
@@ -925,6 +904,147 @@ class AssetManager(QMainWindow):
         self.scenes_list.repaint()
         QApplication.processEvents()
 
+    def load_products_list(self):
+        self.products_list.clear()
+        self.product_file_paths.clear()
+        self.selected_product_item = None
+        self.selected_product_item_widget = None
+
+        if not self.selected_asset and not self.selected_shot:
+            self.products_list.addItem("Please select an asset or shot to view products.")
+            return
+
+        if self.selected_asset:
+            asset_name = self.selected_asset["name"]
+            asset_type = self.selected_asset["type"].lower()
+            asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}")
+            outputs_dir = os.path.join(asset_dir, "outputs")
+            old_dir = os.path.join(outputs_dir, ".old")
+            thumbnail_path = self.default_thumbnail  # Always use default thumbnail
+        elif self.selected_shot:
+            shot_name = self.selected_shot["name"]
+            asset_dir = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
+            outputs_dir = os.path.join(asset_dir, "outputs")
+            old_dir = os.path.join(outputs_dir, ".old")
+            thumbnail_path = self.default_thumbnail  # Always use default thumbnail
+            asset_name = shot_name
+
+        if not os.path.exists(outputs_dir):
+            self.products_list.addItem("No outputs directory found.")
+            print(f"Outputs directory not found: {outputs_dir}")
+            return
+
+        product_files = [f for f in os.listdir(outputs_dir) if f.endswith((".usd", ".fbx", ".abc")) and f.startswith(f"{self.project_short}_{asset_name}_")]
+
+        for file_name in product_files:
+            file_path = os.path.join(outputs_dir, file_name)
+            display_name = f"{asset_name} - {file_name}"
+
+            stage = None
+            for s in ["model", "rig", "animation"]:
+                if f"_{s}." in file_name.lower():
+                    stage = s.capitalize()
+                    break
+            if not stage:
+                stage = "Unknown"
+
+            latest_version = "v001"
+            if os.path.exists(old_dir):
+                old_files = [f for f in os.listdir(old_dir) if f.startswith(f"{self.project_short}_{asset_name}_{stage.lower()}") and f.endswith(file_name[-4:])]
+                if old_files:
+                    versions = [int(re.search(r'_v(\d{3})\.', f).group(1)) for f in old_files if re.search(r'_v(\d{3})\.', f)]
+                    if versions:
+                        latest_version = f"v{max(versions):03d}"
+
+            file_format = os.path.splitext(file_name)[1][1:].lower()
+
+            item_widget = QWidget()
+            item_widget.setObjectName("card-item")
+            item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border-radius: 5px; padding: 10px; }")
+            item_widget.setMouseTracking(True)
+
+            item_layout = QHBoxLayout(item_widget)
+            item_layout.setContentsMargins(10, 10, 10, 10)
+            item_layout.setSpacing(10)
+
+            def enter_event(event, widget=item_widget):
+                if widget != self.selected_product_item_widget:
+                    widget.setStyleSheet("""
+                        QWidget#card-item { background-color: #555555; border-radius: 5px; padding: 10px; }
+                        QWidget#card-item * { background-color: #555555; }
+                    """)
+
+            def leave_event(event, widget=item_widget):
+                if widget != self.selected_product_item_widget:
+                    widget.setStyleSheet("""
+                        QWidget#card-item { background-color: #3c3f41; border-radius: 5px; padding: 10px; }
+                        QWidget#card-item * { background-color: #3c3f41; }
+                    """)
+
+            item_widget.enterEvent = enter_event
+            item_widget.leaveEvent = leave_event
+
+            thumbnail_label = QLabel()
+            thumbnail_label.setObjectName("product-thumbnail")
+            pixmap = QPixmap()
+            if os.path.exists(thumbnail_path):
+                pixmap.load(thumbnail_path)
+            if not pixmap.isNull():
+                pixmap = pixmap.scaledToWidth(100, Qt.SmoothTransformation)
+                thumbnail_label.setPixmap(pixmap)
+            else:
+                message = f"Warning: No valid thumbnail found at {thumbnail_path}..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.status_label.setText(message)
+            thumbnail_label.setMinimumWidth(0)
+            thumbnail_label.setMaximumWidth(100)
+            thumbnail_label.setScaledContents(False)
+            item_layout.addWidget(thumbnail_label, stretch=1)
+
+            content_widget = QWidget()
+            content_layout = QVBoxLayout(content_widget)
+            content_layout.setContentsMargins(0, 0, 0, 0)
+            content_layout.setSpacing(5)
+            item_layout.addWidget(content_widget, stretch=9)
+
+            title_label = QLabel(stage)
+            title_label.setObjectName("product-title")
+            title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+            content_layout.addWidget(title_label)
+
+            info_widget = QWidget()
+            info_layout = QHBoxLayout(info_widget)
+            info_layout.setContentsMargins(0, 0, 0, 0)
+            info_layout.setSpacing(10)
+
+            version_label = QLabel(latest_version)
+            version_label.setObjectName("product-version")
+            info_layout.addWidget(version_label, alignment=Qt.AlignLeft)
+
+            format_label = QLabel(file_format)
+            format_label.setObjectName("product-format")
+            info_layout.addWidget(format_label, alignment=Qt.AlignRight)
+
+            content_layout.addWidget(info_widget)
+
+            item = QListWidgetItem(self.products_list)
+            item.setSizeHint(item_widget.sizeHint())
+            self.products_list.setItemWidget(item, item_widget)
+
+            item.setData(Qt.UserRole, display_name)
+            self.product_file_paths[display_name] = file_path
+
+            item.setSelected(False)
+
+        self.products_list.itemClicked.connect(self.on_product_item_clicked)
+
+        if self.products_list.count() == 0:
+            self.products_list.addItem("No product files found in outputs directory.")
+
+        self.products_list.repaint()
+        QApplication.processEvents()
+
     def open_scene_in_blender(self, item):
         if not item:
             return
@@ -932,7 +1052,7 @@ class AssetManager(QMainWindow):
         if self.selected_scene_item_widget:
             try:
                 self.selected_scene_item_widget.setStyleSheet("""
-                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
+                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; border-radius: 5px; padding: 10px; }
                 """)
             except RuntimeError:
                 pass
@@ -946,7 +1066,7 @@ class AssetManager(QMainWindow):
 
         try:
             self.selected_scene_item_widget.setStyleSheet("""
-                QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; }
+                QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; border-radius: 5px; padding: 10px; }
                 QWidget#card-item * { background-color: #3c3f41; }
             """)
         except RuntimeError:
@@ -984,9 +1104,6 @@ class AssetManager(QMainWindow):
             if len(message) > 50:
                 message = message[:47] + "..."
             self.status_label.setText(message)
-
-    def switch_mode(self, mode):
-        pass
 
     def load_data_ui(self):
         type_counts = {"Characters": 0, "Props": 0, "VFXs": 0}
@@ -1091,95 +1208,6 @@ class AssetManager(QMainWindow):
             msg.move(QDesktopWidget().availableGeometry().center() - msg.rect().center())
             msg.exec_()
 
-    def create_video_from_frames(self, frames_dir):
-        image_extensions = ("*.png", "*.jpg")
-        image_files = []
-        for ext in image_extensions:
-            image_files.extend(glob.glob(os.path.join(frames_dir, ext)))
-
-        if not image_files:
-            return False
-
-        def extract_frame_number(filename):
-            match = re.search(r'_(\d+)\.(png|jpg)$', filename)
-            return int(match.group(1)) if match else float('inf')
-
-        image_files = sorted(image_files, key=extract_frame_number)
-        image_files = [f for f in image_files if extract_frame_number(f) != float('inf')]
-
-        if not image_files:
-            return False
-
-        frame = cv2.imread(image_files[0])
-        if frame is None:
-            return False
-        height, width, layers = frame.shape
-
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        video_writer = cv2.VideoWriter(self.temp_video_path, fourcc, 24.0, (width, height))
-
-        for image_file in image_files:
-            frame = cv2.imread(image_file)
-            if frame is None:
-                continue
-            video_writer.write(frame)
-
-        video_writer.release()
-        return True
-
-    def update_media_player(self):
-        if not self.current_playblast_dir:
-            if self.media_player:
-                self.media_player.stop()
-            return
-
-        playblast_dir = os.path.join(self.current_playblast_dir, "playblast")
-        if not os.path.exists(playblast_dir):
-            try:
-                os.makedirs(playblast_dir, exist_ok=True)
-                message = f"Created playblast directory at {playblast_dir}..."
-                if len(message) > 50:
-                    message = message[:47] + "..."
-                self.status_label.setText(message)
-                if self.media_player:
-                    self.media_player.stop()
-                return
-            except Exception as e:
-                message = f"Failed to create playblast directory: {str(e)}..."
-                if len(message) > 50:
-                    message = message[:47] + "..."
-                self.status_label.setText(message)
-                if self.media_player:
-                    self.media_player.stop()
-                return
-
-        if self.media_player:
-            self.media_player.stop()
-            self.media_player.setMedia(QMediaContent())
-
-        if os.path.exists(self.temp_video_path):
-            try:
-                os.remove(self.temp_video_path)
-            except PermissionError:
-                message = f"Warning: Could not delete old {self.temp_video_path}..."
-                if len(message) > 50:
-                    message = message[:47] + "..."
-                self.status_label.setText(message)
-                return
-
-        if self.create_video_from_frames(playblast_dir):
-            self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(self.temp_video_path)))
-            message = f"Loaded playblast from {playblast_dir}..."
-            if len(message) > 50:
-                message = message[:47] + "..."
-            self.status_label.setText(message)
-        else:
-            self.media_player.stop()
-            message = f"No valid frames found in {playblast_dir}. Expected format: <prefix>_<number>.(png|jpg)..."
-            if len(message) > 50:
-                message = message[:47] + "..."
-            self.status_label.setText(message)
-
     def show_asset_details(self, item):
         if not item:
             print("No item provided to show_asset_details")
@@ -1198,15 +1226,11 @@ class AssetManager(QMainWindow):
                         asset_list.setCurrentItem(i)
                         break
             asset_type = self.selected_asset["type"].lower()
-            asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}")
-            self.current_playblast_dir = asset_dir
             self.settings.setValue("selected_asset", asset_name)
             self.settings.remove("selected_shot")
-            if self.tabs.currentWidget() == self.media_tab:
-                self.update_media_player()
             self.load_scenes_list()
-        else:
-            print(f"Asset {asset_name} not found in assets list")
+            if self.tabs.currentWidget() == self.products_tab:
+                self.load_products_list()
 
     def show_shot_details(self, item):
         if not item:
@@ -1215,13 +1239,11 @@ class AssetManager(QMainWindow):
         self.selected_shot = next((s for s in self.shots if s["name"] == shot_name), None)
         self.selected_asset = None
         if self.selected_shot:
-            shot_dir = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
-            self.current_playblast_dir = shot_dir
             self.settings.setValue("selected_shot", shot_name)
             self.settings.remove("selected_asset")
-            if self.tabs.currentWidget() == self.media_tab:
-                self.update_media_player()
             self.load_scenes_list()
+            if self.tabs.currentWidget() == self.products_tab:
+                self.load_products_list()
 
     def on_tab_changed(self, index):
         if index == 0:  # Assets tab
@@ -1245,8 +1267,11 @@ class AssetManager(QMainWindow):
                             break
                     else:
                         self.scenes_list.clear()
+                        self.products_list.clear()
                         self.scenes_list.addItem("No assets available.")
+                        self.products_list.addItem("No assets available.")
                         self.scenes_list.repaint()
+                        self.products_list.repaint()
         elif index == 1:  # Shots tab
             if not self.selected_shot and self.shot_list.count() > 0:
                 self.shot_list.setCurrentRow(0)
@@ -1262,8 +1287,15 @@ class AssetManager(QMainWindow):
                         break
             else:
                 self.scenes_list.clear()
+                self.products_list.clear()
                 self.scenes_list.addItem("Please select a shot to view scenes.")
+                self.products_list.addItem("Please select a shot to view products.")
                 self.scenes_list.repaint()
+                self.products_list.repaint()
+
+    def on_right_tab_changed(self, index):
+        if self.tabs.widget(index) == self.products_tab:
+            self.load_products_list()
 
     def add_asset(self):
         dialog = AddAssetDialog(self)
@@ -1522,11 +1554,45 @@ class AssetManager(QMainWindow):
             message = message[:47] + "..."
         self.status_label.setText(message)
 
+    def on_scene_selection_changed(self):
+        selected_items = self.scenes_list.selectedItems()
+        if not selected_items:
+            if self.selected_scene_item_widget:
+                try:
+                    self.selected_scene_item_widget.setStyleSheet("""
+                        QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
+                    """)
+                except RuntimeError:
+                    pass
+            self.selected_scene_item = None
+            self.selected_scene_item_widget = None
+            self.status_label.setText("No scene selected.")
+        else:
+            item = selected_items[0]
+            self.on_scene_item_clicked(item)
+
+    def on_product_selection_changed(self):
+        selected_items = self.products_list.selectedItems()
+        if not selected_items:
+            if self.selected_product_item_widget:
+                try:
+                    self.selected_product_item_widget.setStyleSheet("""
+                        QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
+                    """)
+                except RuntimeError:
+                    pass
+            self.selected_product_item = None
+            self.selected_product_item_widget = None
+            self.status_label.setText("No product selected.")
+        else:
+            item = selected_items[0]
+            self.on_product_item_clicked(item)
+
     def on_scene_item_clicked(self, item):
         if self.selected_scene_item_widget:
             try:
                 self.selected_scene_item_widget.setStyleSheet("""
-                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
+                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; border-radius: 5px; padding: 10px; }
                 """)
             except RuntimeError:
                 pass
@@ -1535,47 +1601,46 @@ class AssetManager(QMainWindow):
         self.selected_scene_item_widget = self.scenes_list.itemWidget(item)
 
         display_name = item.data(Qt.UserRole)
-        if display_name and display_name != "No Blender files found in scenefiles directories.":
-            file_path = self.scene_file_paths.get(display_name)
-            if file_path:
-                folder_path = os.path.dirname(file_path)
-                self.status_label.setText(f"Selected: {os.path.basename(file_path)}...")
-                if self.selected_scene_item_widget:
-                    try:
-                        self.selected_scene_item_widget.setStyleSheet("""
-                            QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; }
-                            QWidget#card-item * { background-color: #3c3f41; }
-                        """)
-                    except RuntimeError:
-                        pass
+        if not display_name or display_name == "No Blender files found in scenefiles directories.":
+            self.status_label.setText("Invalid scene selected.")
+            return
 
-    def on_scene_selection_changed(self):
-        selected_items = self.scenes_list.selectedItems()
-        if not selected_items and self.selected_scene_item_widget:
+        try:
+            self.selected_scene_item_widget.setStyleSheet("""
+                QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; border-radius: 5px; padding: 10px; }
+                QWidget#card-item * { background-color: #3c3f41; }
+            """)
+        except RuntimeError:
+            pass
+
+        file_path = self.scene_file_paths.get(display_name)
+        if file_path:
+            message = f"Selected scene: {os.path.basename(file_path)}..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.status_label.setText(message)
+
+    def on_product_item_clicked(self, item):
+        if self.selected_product_item_widget:
             try:
-                self.selected_scene_item_widget.setStyleSheet("""
-                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
+                self.selected_product_item_widget.setStyleSheet("""
+                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; border-radius: 5px; padding: 10px; }
                 """)
-                self.selected_scene_item = None
-                self.selected_scene_item_widget = None
-                self.status_label.setText("No scene selected.")
-            except RuntimeError as e:
-                print(f"RuntimeError: {str(e)}")
+            except RuntimeError:
+                pass
 
-    def keyPressEvent(self, event):
-        if self.selected_scene_item:
-            display_name = self.selected_scene_item.data(Qt.UserRole)
-            if display_name and display_name != "No Blender files found in scenefiles directories.":
-                file_path = self.scene_file_paths.get(display_name)
-                if file_path:
-                    modifiers = event.modifiers()
-                    if modifiers == Qt.ControlModifier:
-                        if event.key() == Qt.Key_X:
-                            self.delete_file(file_path, os.path.basename(file_path), self.scenes_list, self.selected_scene_item)
-                            self.selected_scene_item = None
-                            self.selected_scene_item_widget = None
-                        elif event.key() == Qt.Key_E:
-                            self.open_in_explorer(file_path)
-                        elif event.key() == Qt.Key_C:
-                            self.copy_path(file_path)
-        super().keyPressEvent(event)
+        self.selected_product_item = item
+        self.selected_product_item_widget = self.products_list.itemWidget(item)
+
+        display_name = item.data(Qt.UserRole)
+        if not display_name or display_name == "No product files found in outputs directory.":
+            self.status_label.setText("Invalid product selected.")
+            return
+
+        try:
+            self.selected_product_item_widget.setStyleSheet("""
+                QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; border-radius: 5px; padding: 10px; }
+                QWidget#card-item * { background-color: #3c3f41; }
+            """)
+        except RuntimeError:
+                pass
