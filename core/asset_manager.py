@@ -627,6 +627,8 @@ class AssetManager(QMainWindow):
             path_for_delete = file_path
             display_name_for_delete = os.path.basename(file_path)
         elif widget in self.asset_lists.values():
+            if item is None:
+                return  # Thoát sớm nếu click vào khoảng trống
             asset_name = item.text()
             asset = next((a for a in self.assets if a["name"] == asset_name), None)
             if not asset:
@@ -636,6 +638,8 @@ class AssetManager(QMainWindow):
             path_for_delete = folder_path
             display_name_for_delete = asset_name
         elif widget == self.shot_list:
+            if item is None:
+                return  # Thoát sớm nếu click vào khoảng trống
             shot_name = item.text()
             folder_path = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
             path_for_delete = folder_path
@@ -965,7 +969,6 @@ class AssetManager(QMainWindow):
                         message = message[:47] + "..."
                     self.status_label.setText(message)
                     return
-            # Mở Blender độc lập với creationflags=DETACHED_PROCESS
             subprocess.Popen([self.blender_path, file_path], creationflags=subprocess.DETACHED_PROCESS)
             message = f"Opened '{os.path.basename(file_path)}' in Blender..."
             if len(message) > 50:
