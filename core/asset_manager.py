@@ -9,11 +9,43 @@ from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
                              QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget, 
-                             QHeaderView, QMenu, QApplication, QSplitter, QLineEdit, QFormLayout, QDialog)
-from PyQt5.QtGui import QPixmap, QIcon, QColor, QCursor, QFont
-from PyQt5.QtCore import Qt, QSettings, QEvent, QPoint
+                             QHeaderView, QMenu, QApplication, QSplitter, QLineEdit, QFormLayout, QDialog, QScrollArea, QGridLayout)
+from PyQt5.QtGui import QPixmap, QIcon, QColor, QCursor, QFont, QDrag
+from PyQt5.QtCore import Qt, QSettings, QEvent, QPoint, QMimeData, QUrl, QSize
 
 BASE_DIR = "F:/GitHub/Vexapipe"
+
+# Custom QPushButton subclass to support drag-and-drop
+class DraggableButton(QPushButton):
+    def __init__(self, file_path, parent=None):
+        super().__init__(parent)
+        self.file_path = file_path
+        self.start_pos = None
+        self.setAcceptDrops(True)
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        if event.button() == Qt.LeftButton:
+            self.start_pos = event.pos()
+        else:
+            self.start_pos = None
+
+    def mouseMoveEvent(self, event):
+        if not self.start_pos:
+            return
+        if not (event.buttons() & Qt.LeftButton):
+            return
+        if (event.pos() - self.start_pos).manhattanLength() < QApplication.startDragDistance():
+            return
+
+        if not self.file_path or not os.path.exists(self.file_path):
+            return
+
+        mime_data = QMimeData()
+        mime_data.setUrls([QUrl.fromLocalFile(self.file_path)])
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        drag.exec_(Qt.CopyAction)
 
 class AddAssetDialog(QDialog):
     def __init__(self, parent=None):
@@ -115,7 +147,7 @@ class AssetManager(QMainWindow):
         self.splitter = None
 
         self.current_mode = "Assets"
-        self.products_list = None
+        self.products_grid = None
 
         self.scene_file_paths = {}
         self.product_file_paths = {}
@@ -154,8 +186,8 @@ class AssetManager(QMainWindow):
             QTabWidget::pane { border: 1px solid #555555; background-color: #3c3f41; }
             QTabBar::tab { background-color: #3c3f41; color: #ffffff; padding: 8px; font-family: 'Arial'; font-size: 12px; min-width: 100px; }
             QTabBar::tab:selected { background-color: #4a90e2; }
-            QPushButton { background-color: #4a90e2; color: #ffffff; border: none; padding: 5px; border-radius: 3px; font-family: 'Arial'; font-size: 14px; }
-            QPushButton:hover { background-color: #357abd; }
+            QPushButton { background-color: #3c3f41; color: #ffffff; border: 1px solid #555555; padding: 10px; border-radius: 5px; font-family: 'Arial'; font-size: 14px; }
+            QPushButton:hover { background-color: #4a90e2; }
             QPushButton:disabled { background-color: #555555; }
             QLabel { color: #ffffff; font-family: 'Arial'; font-size: 14px; }
             QPushButton#sectionButton { background-color: #3c3f41; color: #ffffff; border: none; padding: 5px; text-align: left; font-family: 'Arial'; font-size: 14px; font-weight: bold; }
@@ -415,11 +447,13 @@ class AssetManager(QMainWindow):
         self.scenes_list.viewport().installEventFilter(self)
 
         products_layout = QVBoxLayout(self.products_tab)
-        self.products_list = QListWidget()
-        self.products_list.setViewMode(QListWidget.ListMode)
-        self.products_list.setSpacing(5)
-        self.products_list.itemSelectionChanged.connect(self.on_product_selection_changed)
-        products_layout.addWidget(self.products_list)
+        self.products_scroll_area = QScrollArea()
+        self.products_scroll_area.setWidgetResizable(True)
+        self.products_widget = QWidget()
+        self.products_grid = QGridLayout(self.products_widget)
+        self.products_scroll_area.setWidget(self.products_widget)
+        products_layout.addWidget(self.products_scroll_area)
+        self.products_widget.installEventFilter(self)
 
         media_layout = QVBoxLayout(self.media_tab)
         # Để trống tab Media
@@ -493,17 +527,37 @@ class AssetManager(QMainWindow):
                         self.status_label.setText("No scene selected.")
                     except RuntimeError as e:
                         print(f"RuntimeError in eventFilter: {str(e)}")
-        elif source == self.products_list.viewport() and event.type() == QEvent.MouseButtonPress:
+        elif source == self.products_widget and event.type() == QEvent.MouseButtonPress:
             pos = event.pos()
-            item = self.products_list.itemAt(pos)
-            if not item:
-                self.products_list.clearSelection()
+            for i in reversed(range(self.products_grid.count())):
+                widget = self.products_grid.itemAt(i).widget()
+                if widget and isinstance(widget, QPushButton) and widget.geometry().contains(pos):
+                    if widget != self.selected_product_item_widget:
+                        if self.selected_product_item_widget:
+                            try:
+                                self.selected_product_item_widget.setStyleSheet("""
+                                    QPushButton { background-color: #3c3f41; border: none; }
+                                """)
+                            except RuntimeError as e:
+                                print(f"RuntimeError in eventFilter: {str(e)}")
+                        self.selected_product_item_widget = widget
+                        try:
+                            widget.setStyleSheet("""
+                                QPushButton { background-color: #3c3f41; border: 2px solid #4a90e2; }
+                            """)
+                        except RuntimeError as e:
+                            print(f"RuntimeError in eventFilter: {str(e)}")
+                        message = f"Selected product: {widget.text()}..."
+                        if len(message) > 50:
+                            message = message[:47] + "..."
+                        self.status_label.setText(message)
+                    break
+            else:
                 if self.selected_product_item_widget:
                     try:
                         self.selected_product_item_widget.setStyleSheet("""
-                            QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
+                            QPushButton { background-color: #3c3f41; border: none; }
                         """)
-                        self.selected_product_item = None
                         self.selected_product_item_widget = None
                         self.status_label.setText("No product selected.")
                     except RuntimeError as e:
@@ -905,13 +959,21 @@ class AssetManager(QMainWindow):
         QApplication.processEvents()
 
     def load_products_list(self):
-        self.products_list.clear()
+        # Xóa các widget cũ trong grid
+        for i in reversed(range(self.products_grid.count())):
+            widget = self.products_grid.itemAt(i).widget()
+            if widget:
+                widget.deleteLater()
+
         self.product_file_paths.clear()
         self.selected_product_item = None
         self.selected_product_item_widget = None
 
         if not self.selected_asset and not self.selected_shot:
-            self.products_list.addItem("Please select an asset or shot to view products.")
+            no_products_btn = QPushButton("Please select an asset or shot to view products.")
+            no_products_btn.setFixedSize(200, 150)
+            no_products_btn.setEnabled(False)
+            self.products_grid.addWidget(no_products_btn, 0, 0)
             return
 
         if self.selected_asset:
@@ -920,25 +982,31 @@ class AssetManager(QMainWindow):
             asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}")
             outputs_dir = os.path.join(asset_dir, "outputs")
             old_dir = os.path.join(outputs_dir, ".old")
-            thumbnail_path = self.default_thumbnail  # Always use default thumbnail
+            thumbnail_path = self.default_thumbnail
         elif self.selected_shot:
             shot_name = self.selected_shot["name"]
             asset_dir = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
             outputs_dir = os.path.join(asset_dir, "outputs")
             old_dir = os.path.join(outputs_dir, ".old")
-            thumbnail_path = self.default_thumbnail  # Always use default thumbnail
+            thumbnail_path = self.default_thumbnail
             asset_name = shot_name
 
         if not os.path.exists(outputs_dir):
-            self.products_list.addItem("No outputs directory found.")
+            no_products_btn = QPushButton("No outputs directory found.")
+            no_products_btn.setFixedSize(200, 150)
+            no_products_btn.setEnabled(False)
+            self.products_grid.addWidget(no_products_btn, 0, 0)
             print(f"Outputs directory not found: {outputs_dir}")
             return
 
         product_files = [f for f in os.listdir(outputs_dir) if f.endswith((".usd", ".fbx", ".abc")) and f.startswith(f"{self.project_short}_{asset_name}_")]
 
+        row = 0
+        col = 0
+        product_found = False
         for file_name in product_files:
             file_path = os.path.join(outputs_dir, file_name)
-            display_name = f"{asset_name} - {file_name}"
+            display_name = file_name  # Use file_name as the key for consistency
 
             stage = None
             for s in ["model", "rig", "animation"]:
@@ -958,91 +1026,44 @@ class AssetManager(QMainWindow):
 
             file_format = os.path.splitext(file_name)[1][1:].lower()
 
-            item_widget = QWidget()
-            item_widget.setObjectName("card-item")
-            item_widget.setStyleSheet("QWidget#card-item { background-color: #3c3f41; border-radius: 5px; padding: 10px; }")
-            item_widget.setMouseTracking(True)
+            # Use DraggableButton instead of QPushButton
+            product_btn = DraggableButton(file_path)
+            product_btn.setFixedSize(200, 150)
 
-            item_layout = QHBoxLayout(item_widget)
-            item_layout.setContentsMargins(10, 10, 10, 10)
-            item_layout.setSpacing(10)
-
-            def enter_event(event, widget=item_widget):
-                if widget != self.selected_product_item_widget:
-                    widget.setStyleSheet("""
-                        QWidget#card-item { background-color: #555555; border-radius: 5px; padding: 10px; }
-                        QWidget#card-item * { background-color: #555555; }
-                    """)
-
-            def leave_event(event, widget=item_widget):
-                if widget != self.selected_product_item_widget:
-                    widget.setStyleSheet("""
-                        QWidget#card-item { background-color: #3c3f41; border-radius: 5px; padding: 10px; }
-                        QWidget#card-item * { background-color: #3c3f41; }
-                    """)
-
-            item_widget.enterEvent = enter_event
-            item_widget.leaveEvent = leave_event
-
-            thumbnail_label = QLabel()
-            thumbnail_label.setObjectName("product-thumbnail")
-            pixmap = QPixmap()
+            # Tìm thumbnail
             if os.path.exists(thumbnail_path):
-                pixmap.load(thumbnail_path)
-            if not pixmap.isNull():
-                pixmap = pixmap.scaledToWidth(100, Qt.SmoothTransformation)
-                thumbnail_label.setPixmap(pixmap)
+                pixmap = QPixmap(thumbnail_path)
+                if not pixmap.isNull():
+                    product_btn.setIcon(QIcon(pixmap))
+                    product_btn.setIconSize(QSize(180, 120))
             else:
-                message = f"Warning: No valid thumbnail found at {thumbnail_path}..."
-                if len(message) > 50:
-                    message = message[:47] + "..."
-                self.status_label.setText(message)
-            thumbnail_label.setMinimumWidth(0)
-            thumbnail_label.setMaximumWidth(100)
-            thumbnail_label.setScaledContents(False)
-            item_layout.addWidget(thumbnail_label, stretch=1)
+                default_icon_path = os.path.join(BASE_DIR, "Resources", "default_icons", "default_product_icon.png")
+                if os.path.exists(default_icon_path):
+                    product_btn.setIcon(QIcon(default_icon_path))
+                    product_btn.setIconSize(QSize(180, 120))
+                else:
+                    product_btn.setText(f"{stage}\n({file_format})")
 
-            content_widget = QWidget()
-            content_layout = QVBoxLayout(content_widget)
-            content_layout.setContentsMargins(0, 0, 0, 0)
-            content_layout.setSpacing(5)
-            item_layout.addWidget(content_widget, stretch=9)
+            product_btn.setText(file_name)
+            self.products_grid.addWidget(product_btn, row, col)
 
-            title_label = QLabel(stage)
-            title_label.setObjectName("product-title")
-            title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-            content_layout.addWidget(title_label)
+            self.product_file_paths[display_name] = file_path  # Store file_path with display_name (file_name)
 
-            info_widget = QWidget()
-            info_layout = QHBoxLayout(info_widget)
-            info_layout.setContentsMargins(0, 0, 0, 0)
-            info_layout.setSpacing(10)
+            col += 1
+            if col > 3:
+                col = 0
+                row += 1
 
-            version_label = QLabel(latest_version)
-            version_label.setObjectName("product-version")
-            info_layout.addWidget(version_label, alignment=Qt.AlignLeft)
+            product_found = True
 
-            format_label = QLabel(file_format)
-            format_label.setObjectName("product-format")
-            info_layout.addWidget(format_label, alignment=Qt.AlignRight)
+        if not product_found:
+            no_products_btn = QPushButton("No product files found in outputs directory.")
+            no_products_btn.setFixedSize(200, 150)
+            no_products_btn.setEnabled(False)
+            self.products_grid.addWidget(no_products_btn, 0, 0)
 
-            content_layout.addWidget(info_widget)
-
-            item = QListWidgetItem(self.products_list)
-            item.setSizeHint(item_widget.sizeHint())
-            self.products_list.setItemWidget(item, item_widget)
-
-            item.setData(Qt.UserRole, display_name)
-            self.product_file_paths[display_name] = file_path
-
-            item.setSelected(False)
-
-        self.products_list.itemClicked.connect(self.on_product_item_clicked)
-
-        if self.products_list.count() == 0:
-            self.products_list.addItem("No product files found in outputs directory.")
-
-        self.products_list.repaint()
+        self.products_widget.repaint()
+        self.products_scroll_area.repaint()
         QApplication.processEvents()
 
     def open_scene_in_blender(self, item):
@@ -1267,11 +1288,10 @@ class AssetManager(QMainWindow):
                             break
                     else:
                         self.scenes_list.clear()
-                        self.products_list.clear()
+                        self.products_grid = None  # Reset grid
+                        self.load_products_list()
                         self.scenes_list.addItem("No assets available.")
-                        self.products_list.addItem("No assets available.")
                         self.scenes_list.repaint()
-                        self.products_list.repaint()
         elif index == 1:  # Shots tab
             if not self.selected_shot and self.shot_list.count() > 0:
                 self.shot_list.setCurrentRow(0)
@@ -1287,11 +1307,10 @@ class AssetManager(QMainWindow):
                         break
             else:
                 self.scenes_list.clear()
-                self.products_list.clear()
+                self.products_grid = None  # Reset grid
+                self.load_products_list()
                 self.scenes_list.addItem("Please select a shot to view scenes.")
-                self.products_list.addItem("Please select a shot to view products.")
                 self.scenes_list.repaint()
-                self.products_list.repaint()
 
     def on_right_tab_changed(self, index):
         if self.tabs.widget(index) == self.products_tab:
@@ -1571,23 +1590,6 @@ class AssetManager(QMainWindow):
             item = selected_items[0]
             self.on_scene_item_clicked(item)
 
-    def on_product_selection_changed(self):
-        selected_items = self.products_list.selectedItems()
-        if not selected_items:
-            if self.selected_product_item_widget:
-                try:
-                    self.selected_product_item_widget.setStyleSheet("""
-                        QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
-                    """)
-                except RuntimeError:
-                    pass
-            self.selected_product_item = None
-            self.selected_product_item_widget = None
-            self.status_label.setText("No product selected.")
-        else:
-            item = selected_items[0]
-            self.on_product_item_clicked(item)
-
     def on_scene_item_clicked(self, item):
         if self.selected_scene_item_widget:
             try:
@@ -1619,28 +1621,3 @@ class AssetManager(QMainWindow):
             if len(message) > 50:
                 message = message[:47] + "..."
             self.status_label.setText(message)
-
-    def on_product_item_clicked(self, item):
-        if self.selected_product_item_widget:
-            try:
-                self.selected_product_item_widget.setStyleSheet("""
-                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; border-radius: 5px; padding: 10px; }
-                """)
-            except RuntimeError:
-                pass
-
-        self.selected_product_item = item
-        self.selected_product_item_widget = self.products_list.itemWidget(item)
-
-        display_name = item.data(Qt.UserRole)
-        if not display_name or display_name == "No product files found in outputs directory.":
-            self.status_label.setText("Invalid product selected.")
-            return
-
-        try:
-            self.selected_product_item_widget.setStyleSheet("""
-                QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; border-radius: 5px; padding: 10px; }
-                QWidget#card-item * { background-color: #3c3f41; }
-            """)
-        except RuntimeError:
-                pass
