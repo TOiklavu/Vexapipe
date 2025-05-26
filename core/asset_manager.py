@@ -9,11 +9,200 @@ from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QListWidgetItem, QLabel, QPushButton, QTabWidget,
                              QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QDesktopWidget, 
-                             QHeaderView, QMenu, QApplication, QSplitter, QLineEdit, QFormLayout, QDialog, QScrollArea, QGridLayout)
-from PyQt5.QtGui import QPixmap, QIcon, QColor, QCursor, QFont, QDrag
-from PyQt5.QtCore import Qt, QSettings, QEvent, QPoint, QMimeData, QUrl, QSize
+                             QHeaderView, QMenu, QApplication, QSplitter, QLineEdit, QFormLayout, QDialog, QScrollArea, QGridLayout, QListView)
+from PyQt5.QtGui import QPixmap, QIcon, QColor, QCursor, QFont, QDrag, QImage, QImageReader
+from PyQt5.QtCore import Qt, QSettings, QEvent, QPoint, QUrl, QSize, QFileInfo, QMimeData
 
 BASE_DIR = "F:/GitHub/Vexapipe"
+
+class LibraryItemWidget(QWidget):
+    def __init__(self, file_path, asset_manager):
+        super().__init__()
+        self.file_path = file_path
+        self.asset_manager = asset_manager
+        self.drag_start_position = QPoint()
+
+        self.setAttribute(Qt.WA_Hover)
+        self.setMouseTracking(True)
+
+        # Container để áp dụng border chọn/hover
+        self.container = QWidget(self)
+        self.container.setObjectName("thumbnail_container")
+        self.container.setStyleSheet("""
+            QWidget#thumbnail_container {
+                background-color: #3c3f41;
+                border: 2px solid transparent;
+                border-radius: 5px;
+            }
+        """)
+
+        self.build_ui()
+
+    def build_ui(self):
+        layout = QVBoxLayout(self.container)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(4)
+
+        # Thumbnail
+        thumbnail = QLabel()
+        reader = QImageReader(self.file_path)
+        reader.setAutoTransform(True)
+
+        original_size = reader.size()
+        if original_size.isValid():
+            w, h = original_size.width(), original_size.height()
+            ratio = min(160 / w, 160 / h)
+            scaled_size = QSize(int(w * ratio), int(h * ratio))
+            reader.setScaledSize(scaled_size)
+            image = reader.read()
+            if not image.isNull():
+                pixmap = QPixmap.fromImage(image)
+                thumbnail.setPixmap(pixmap.scaled(160, 160, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                thumbnail.setText("No Preview")
+        else:
+            thumbnail.setText("No Preview")
+
+        thumbnail.setAlignment(Qt.AlignCenter)
+        layout.addWidget(thumbnail)
+
+        # Filename
+        name = os.path.basename(self.file_path).upper()
+        name_label = QLabel(name)
+        name_label.setAlignment(Qt.AlignCenter)
+        name_label.setStyleSheet("font-weight: bold; color: white; font-size: 12px;")
+        layout.addWidget(name_label)
+
+        # Metadata
+        ext = os.path.splitext(self.file_path)[1][1:].lower()
+        size_mb = round(os.path.getsize(self.file_path) / (1024 * 1024), 2)
+        image = QImage(self.file_path)
+        res = f"{image.width()}x{image.height()}" if not image.isNull() else "?"
+        meta_label = QLabel(f".{ext}   {size_mb}MB   {res}")
+        meta_label.setAlignment(Qt.AlignCenter)
+        meta_label.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(meta_label)
+
+        # Bao bọc container
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.addWidget(self.container)
+
+    def enterEvent(self, event):
+        self.container.setStyleSheet("""
+            QWidget#thumbnail_container {
+                background-color: #505050;
+                border: 2px solid #aaaaaa;
+                border-radius: 5px;
+            }
+        """)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.asset_manager.selected_library_item_widget != self:
+            self.reset_style()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self.show_context_menu(event.pos())
+        elif event.button() == Qt.LeftButton:
+            self.asset_manager.select_library_item(self)
+            self.drag_start_position = event.pos()
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.LeftButton):
+            return
+        if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+            return
+
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(self.file_path)])
+        drag.setMimeData(mime)
+
+        pixmap = QPixmap(self.file_path)
+        if not pixmap.isNull():
+            drag.setPixmap(pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            drag.setHotSpot(QPoint(50, 50))
+
+        drag.exec_(Qt.CopyAction)
+
+    def enterEvent(self, event):
+        self.container.setStyleSheet("""
+            QWidget#thumbnail_container {
+                background-color: #d9d9d9;
+                border: 2px solid #aaaaaa;
+                border-radius: 5px;
+            }
+        """)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.asset_manager.selected_library_item_widget != self:
+            self.reset_style()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self.show_context_menu(event.pos())
+        elif event.button() == Qt.LeftButton:
+            self.asset_manager.select_library_item(self)
+
+    def show_context_menu(self, pos):
+        menu = QMenu()
+        menu.addAction("Open in Explorer", lambda: self.asset_manager.open_in_explorer(self.file_path))
+        menu.addAction("Copy Path", lambda: self.asset_manager.copy_path(self.file_path))
+        menu.addAction("Delete", lambda: self.asset_manager.delete_file(self.file_path, os.path.basename(self.file_path), self.asset_manager.libraries_list))
+        menu.exec_(self.mapToGlobal(pos))
+
+    def highlight_selected(self):
+        self.container.setStyleSheet("""
+            QWidget#thumbnail_container {
+                background-color: #ededed;
+                border: 2px solid #39bbe3;
+                border-radius: 5px;
+            }
+        """)
+
+    def reset_style(self):
+        self.container.setStyleSheet("""
+            QWidget#thumbnail_container {
+                background-color: #ededed;
+                border: 2px solid transparent;
+                border-radius: 5px;
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self.show_context_menu(event.pos())
+        elif event.button() == Qt.LeftButton:
+            self.asset_manager.select_library_item(self)
+            self.drag_start_position = event.pos()  # Bắt đầu điểm kéo
+
+        def mouseMoveEvent(self, event):
+            if not (event.buttons() & Qt.LeftButton):
+                return
+
+            if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+                return
+
+            drag = QDrag(self)
+            mime_data = QMimeData()
+            mime_data.setUrls([QUrl.fromLocalFile(self.file_path)])
+
+            drag.setMimeData(mime_data)
+
+            # Hiển thị thumbnail khi drag
+            pixmap = QPixmap(self.file_path)
+            if not pixmap.isNull():
+                preview = pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                drag.setPixmap(preview)
+                drag.setHotSpot(QPoint(preview.width() // 2, preview.height() // 2))
+
+            drag.exec_(Qt.CopyAction)        
 
 # Custom QPushButton subclass to support drag-and-drop and context menu
 class DraggableButton(QPushButton):
@@ -175,6 +364,8 @@ class AssetManager(QMainWindow):
         self.project_name = os.path.basename(project_path)
         self.selected_asset = None
         self.selected_shot = None
+        self.selected_library_item_widget = None
+
         
         self.pipeline_dir = os.path.join(self.project_path, "00_Pipeline")
         self.icons_dir = os.path.join(self.pipeline_dir, "icons")
@@ -233,53 +424,19 @@ class AssetManager(QMainWindow):
 
         self.init_ui()
 
-        self.setStyleSheet("""
-            QMainWindow { background-color: #2b2b2b; }
-            QWidget { background-color: #2b2b2b; color: #ffffff; }
-            QListWidget#assetList { 
-                background-color: #3c3f41; 
-                border: 1px solid #555555; 
-                color: #ffffff; 
-                font-family: 'Arial'; 
-                font-size: 14px; 
-            }
-            QListWidget#assetList::item:selected { 
-                background-color: #4a90e2; 
-            }
-            QListWidget#shotList { 
-                background-color: #3c3f41; 
-                border: 1px solid #555555; 
-                color: #ffffff; 
-                font-family: 'Arial'; 
-                font-size: 14px; 
-            }
-            QListWidget#shotList::item:selected { 
-                background-color: #4a90e2; }
-            QListWidget#shotList::item:hover { 
-                background-color: #555555; }
-            QTabWidget::pane { border: 1px solid #555555; background-color: #3c3f41; }
-            QTabBar::tab { background-color: #3c3f41; color: #ffffff; padding: 8px; font-family: 'Arial'; font-size: 12px; min-width: 100px; }
-            QTabBar::tab:selected { background-color: #4a90e2; }
-            QPushButton { background-color: #3c3f41; color: #ffffff; border: 1px solid #555555; padding: 10px; border-radius: 5px; font-family: 'Arial'; font-size: 14px; }
-            QPushButton:hover { background-color: #4a90e2; }
-            QPushButton:disabled { background-color: #555555; }
-            QLabel { color: #ffffff; font-family: 'Arial'; font-size: 14px; }
-            QPushButton#sectionButton { background-color: #3c3f41; color: #ffffff; border: none; padding: 5px; text-align: left; font-family: 'Arial'; font-size: 14px; font-weight: bold; }
-            QPushButton#sectionButton:hover { background-color: #4a90e2; }
-            QPushButton#modeButton { background-color: #3c3f41; color: #ffffff; border: none; padding: 5px; font-family: 'Arial'; font-size: 14px; font-weight: bold; }
-            QPushButton#modeButton:hover { background-color: #4a90e2; }
-            QTableWidget { background-color: #3c3f41; color: #ffffff; border: 1px solid #555555; font-family: 'Arial'; font-size: 14px; }
-            QTableWidget::item { background-color: #3c3f41; border: 1px solid #555555; }
-            QTableWidget::item:selected { background-color: #4a90e2; }
-            QComboBox { background-color: #3c3f41; color: #ffffff; border: 1px solid #555555; padding: 3px; }
-            QComboBox::drop-down { border: none; }
-            .project-title, .scene-title, .product-title { font-weight: bold; font-size: 16px; }
-            .project-info, .scene-stage, .product-version { font-size: 14px; }
-            .scene-date, .product-format { font-size: 14px; }
-            .scene-creator { font-size: 14px; }
-            .project-thumbnail, .scene-thumbnail, .product-thumbnail { max-width: 100px; height: auto; }
-            QWidget#card-item { border-radius: 5px; padding: 10px; }
-        """)
+        
+
+    def select_library_item(self, widget):
+        if hasattr(self, "selected_library_item_widget") and self.selected_library_item_widget:
+            try:
+                self.selected_library_item_widget.reset_style()
+            except RuntimeError:
+                self.selected_library_item_widget = None
+
+        self.selected_library_item_widget = widget
+        widget.highlight_selected()
+        self.status_label.setText(f"Selected image: {os.path.basename(widget.file_path)}")
+
 
     def _create_initial_structure(self):
         folders = ["00_Pipeline", "00_Pipeline/assets", "01_Management", "02_Designs", "03_Production", "04_Resources"]
@@ -531,13 +688,18 @@ class AssetManager(QMainWindow):
         self.products_widget.installEventFilter(self)
 
         libraries_layout = QVBoxLayout(self.libraries_tab)
-        self.libraries_scroll_area = QScrollArea()
-        self.libraries_scroll_area.setWidgetResizable(True)
-        self.libraries_widget = QWidget()
-        self.libraries_grid = QGridLayout(self.libraries_widget)
-        self.libraries_scroll_area.setWidget(self.libraries_widget)
-        libraries_layout.addWidget(self.libraries_scroll_area)
-        self.libraries_widget.installEventFilter(self)
+        self.libraries_list = QListWidget()
+        self.libraries_list.setViewMode(QListView.IconMode)
+        self.libraries_list.setResizeMode(QListView.Adjust)
+        self.libraries_list.setFlow(QListView.LeftToRight)
+        self.libraries_list.setWrapping(True)
+        self.libraries_list.setSpacing(10)
+        self.libraries_list.setIconSize(QSize(160, 160))
+        self.libraries_list.setMovement(QListView.Static)
+        self.libraries_list.setUniformItemSizes(True)
+        libraries_layout.addWidget(self.libraries_list)
+    
+        self.libraries_list.itemDoubleClicked.connect(self.preview_library_item)
 
         media_layout = QVBoxLayout(self.media_tab)
         # Để trống tab Media
@@ -701,17 +863,9 @@ class AssetManager(QMainWindow):
         QApplication.processEvents()
 
     def load_libraries_list(self):
-        # Xóa các widget cũ trong grid
-        for i in reversed(range(self.libraries_grid.count())):
-            widget = self.libraries_grid.itemAt(i).widget()
-            if widget:
-                widget.deleteLater()
+        self.libraries_list.clear()
 
         if not self.selected_asset:
-            no_libraries_btn = QPushButton("Please select an asset to view libraries.")
-            no_libraries_btn.setFixedSize(200, 150)
-            no_libraries_btn.setEnabled(False)
-            self.libraries_grid.addWidget(no_libraries_btn, 0, 0)
             self.status_label.setText("No asset selected for libraries.")
             return
 
@@ -720,53 +874,41 @@ class AssetManager(QMainWindow):
         textures_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}/textures")
 
         if not os.path.exists(textures_dir):
-            no_libraries_btn = QPushButton("No textures directory found.")
-            no_libraries_btn.setFixedSize(200, 150)
-            no_libraries_btn.setEnabled(False)
-            self.libraries_grid.addWidget(no_libraries_btn, 0, 0)
-            self.status_label.setText(f"Textures directory not found: {os.path.basename(textures_dir)}")
-            return
+            os.makedirs(textures_dir)
 
-        image_files = [f for f in os.listdir(textures_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
+        image_files = [f for f in os.listdir(textures_dir) if f.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".tiff"))]
 
-        if not image_files:
-            no_libraries_btn = QPushButton("No image files found in textures directory.")
-            no_libraries_btn.setFixedSize(200, 150)
-            no_libraries_btn.setEnabled(False)
-            self.libraries_grid.addWidget(no_libraries_btn, 0, 0)
-            self.status_label.setText("No images found in textures directory.")
-            return
-
-        row = 0
-        col = 0
         for file_name in image_files:
             file_path = os.path.join(textures_dir, file_name)
-            display_name = file_name
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(180, 220))
+            self.libraries_list.addItem(item)
 
-            image_btn = DraggableButton(file_path, self)
-            image_btn.setFixedSize(200, 150)
+            widget = LibraryItemWidget(file_path, self)
+            self.libraries_list.setItemWidget(item, widget)
 
-            pixmap = QPixmap(file_path)
-            if not pixmap.isNull():
-                image_btn.setIcon(QIcon(pixmap))
-                image_btn.setIconSize(QSize(180, 120))
-            else:
-                image_btn.setText(f"{os.path.splitext(file_name)[0]}\n({os.path.splitext(file_name)[1][1:].upper()})")
+        self.status_label.setText(f"Loaded {len(image_files)} image(s).")
 
-            image_btn.setText(file_name)
-            image_btn.setObjectName("library-item")
-            self.libraries_grid.addWidget(image_btn, row, col)
 
-            col += 1
-            if col > 3:
-                col = 0
-                row += 1
+    def preview_library_item(self, item):
+        file_path = item.data(Qt.UserRole)
+        if not os.path.exists(file_path):
+            QMessageBox.warning(self, "Error", "File does not exist.")
+            return
 
-        self.libraries_widget.repaint()
-        self.libraries_scroll_area.repaint()
-        self.status_label.setText(f"Loaded {len(image_files)} images from {os.path.basename(textures_dir)}.")
-        QApplication.processEvents()
+        dlg = QDialog(self)
+        dlg.setWindowTitle(item.text())
+        dlg.resize(600, 400)
 
+        layout = QVBoxLayout(dlg)
+        label = QLabel()
+        pixmap = QPixmap(file_path)
+        label.setPixmap(pixmap.scaledToWidth(550, Qt.SmoothTransformation))
+        label.setAlignment(Qt.AlignCenter)
+
+        layout.addWidget(label)
+        dlg.exec_()
+        
     def on_right_tab_changed(self, index):
         if self.tabs.widget(index) == self.products_tab:
             self.load_products_list()
@@ -809,128 +951,6 @@ class AssetManager(QMainWindow):
             self.selected_scene_item_widget = None
             self.status_label.setText("No scene selected.")
 
-    def eventFilter(self, source, event):
-        # Handle mouse events for selection in Scenes tab
-        if source == self.scenes_list.viewport() and event.type() == QEvent.MouseButtonPress:
-            pos = event.pos()
-            item = self.scenes_list.itemAt(pos)
-            if not item:
-                self.scenes_list.clearSelection()
-                if self.selected_scene_item_widget:
-                    try:
-                        self.selected_scene_item_widget.setStyleSheet("""
-                            QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
-                        """)
-                        self.selected_scene_item = None
-                        self.selected_scene_item_widget = None
-                        self.status_label.setText("No scene selected.")
-                    except RuntimeError as e:
-                        print(f"RuntimeError in eventFilter: {str(e)}")
-        # Handle mouse events for selection in Products tab
-        elif source == self.products_widget and event.type() == QEvent.MouseButtonPress:
-            pos = event.pos()
-            for i in reversed(range(self.products_grid.count())):
-                widget = self.products_grid.itemAt(i).widget()
-                if widget and isinstance(widget, DraggableButton) and widget.geometry().contains(pos):
-                    if widget != self.selected_product_item_widget:
-                        if self.selected_product_item_widget:
-                            try:
-                                self.selected_product_item_widget.setStyleSheet("""
-                                    QPushButton { background-color: #3c3f41; border: none; }
-                                """)
-                            except RuntimeError as e:
-                                print(f"RuntimeError in eventFilter: {str(e)}")
-                        self.selected_product_item_widget = widget
-                        try:
-                            widget.setStyleSheet("""
-                                QPushButton { background-color: #3c3f41; border: 2px solid #4a90e2; }
-                            """)
-                            self.status_label.setText(f"Selected product: {widget.text()}...")
-                            if len(self.status_label.text()) > 50:
-                                self.status_label.setText(self.status_label.text()[:47] + "...")
-                        except RuntimeError as e:
-                            print(f"RuntimeError in eventFilter: {str(e)}")
-                    break
-            else:
-                if self.selected_product_item_widget:
-                    try:
-                        self.selected_product_item_widget.setStyleSheet("""
-                            QPushButton { background-color: #3c3f41; border: none; }
-                        """)
-                        self.selected_product_item_widget = None
-                        self.status_label.setText("No product selected.")
-                    except RuntimeError as e:
-                        print(f"RuntimeError in eventFilter: {str(e)}")
-        # Handle mouse events for selection in Libraries tab
-        elif source == self.libraries_widget and event.type() == QEvent.MouseButtonPress:
-            pos = event.pos()
-            for i in reversed(range(self.libraries_grid.count())):
-                widget = self.libraries_grid.itemAt(i).widget()
-                if widget and isinstance(widget, DraggableButton) and widget.geometry().contains(pos):
-                    if widget != self.selected_library_item_widget:
-                        if self.selected_library_item_widget:
-                            try:
-                                self.selected_library_item_widget.setStyleSheet("""
-                                    QPushButton { background-color: #3c3f41; border: none; }
-                                """)
-                            except RuntimeError as e:
-                                print(f"RuntimeError in eventFilter: {str(e)}")
-                        self.selected_library_item_widget = widget
-                        try:
-                            widget.setStyleSheet("""
-                                QPushButton { background-color: #3c3f41; border: 2px solid #4a90e2; }
-                            """)
-                            self.status_label.setText(f"Selected image: {widget.text()}...")
-                            if len(self.status_label.text()) > 50:
-                                self.status_label.setText(self.status_label.text()[:47] + "...")
-                        except RuntimeError as e:
-                            print(f"RuntimeError in eventFilter: {str(e)}")
-                    break
-            else:
-                if self.selected_library_item_widget:
-                    try:
-                        self.selected_library_item_widget.setStyleSheet("""
-                            QPushButton { background-color: #3c3f41; border: none; }
-                        """)
-                        self.selected_library_item_widget = None
-                        self.status_label.setText("No image selected.")
-                    except RuntimeError as e:
-                        print(f"RuntimeError in eventFilter: {str(e)}")
-        # Handle key press events for shortcuts
-        elif (source == self.products_widget or source == self.libraries_widget or source == self.scenes_list) and event.type() == QEvent.KeyPress:
-            if self.selected_product_item_widget or self.selected_library_item_widget or self.selected_scene_item:
-                if event.key() == Qt.Key_E and event.modifiers() == Qt.ControlModifier:
-                    if self.selected_product_item_widget:
-                        self.open_in_explorer(self.product_file_paths.get(self.selected_product_item_widget.text()))
-                    elif self.selected_library_item_widget:
-                        self.open_in_explorer(self.selected_library_item_widget.file_path)
-                    elif self.selected_scene_item:
-                        display_name = self.selected_scene_item.data(Qt.UserRole)
-                        file_path = self.scene_file_paths.get(display_name)
-                        self.open_in_explorer(file_path)
-                    return True
-                elif event.key() == Qt.Key_C and event.modifiers() == Qt.ControlModifier:
-                    if self.selected_product_item_widget:
-                        self.copy_path(self.product_file_paths.get(self.selected_product_item_widget.text()))
-                    elif self.selected_library_item_widget:
-                        self.copy_path(self.selected_library_item_widget.file_path)
-                    elif self.selected_scene_item:
-                        display_name = self.selected_scene_item.data(Qt.UserRole)
-                        file_path = self.scene_file_paths.get(display_name)
-                        self.copy_path(file_path)
-                    return True
-                elif event.key() == Qt.Key_X and event.modifiers() == Qt.ControlModifier:
-                    if self.selected_product_item_widget:
-                        self.delete_file(self.product_file_paths.get(self.selected_product_item_widget.text()), os.path.basename(self.product_file_paths.get(self.selected_product_item_widget.text())), self.products_widget)
-                    elif self.selected_library_item_widget:
-                        self.delete_file(self.selected_library_item_widget.file_path, os.path.basename(self.selected_library_item_widget.file_path), self.libraries_widget)
-                    elif self.selected_scene_item:
-                        display_name = self.selected_scene_item.data(Qt.UserRole)
-                        file_path = self.scene_file_paths.get(display_name)
-                        self.delete_file(file_path, os.path.basename(file_path), self.scenes_list, self.selected_scene_item)
-                    return True
-        return super().eventFilter(source, event)
-
     def toggle_section(self, asset_type):
         self.section_states[asset_type] = not self.section_states[asset_type]
         asset_list = self.asset_lists[asset_type]
@@ -965,6 +985,12 @@ class AssetManager(QMainWindow):
 
         self.data["section_states"] = self.section_states
         self.save_data()
+
+    def switch_library_view(self):
+        selected_mode = self.library_view_selector.currentText()
+        self.library_view_mode = "Thumbnail" if "Thumbnail" in selected_mode else "Detail"
+        self.load_libraries_list()
+
 
     def show_context_menu(self, position):
         widget = self.sender()
