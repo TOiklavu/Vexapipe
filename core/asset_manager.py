@@ -229,6 +229,7 @@ class AssetManager(QMainWindow):
         self.selected_scene_item_widget = None
         self.selected_product_item = None
         self.selected_product_item_widget = None
+        self.selected_library_item_widget = None
 
         self.init_ui()
 

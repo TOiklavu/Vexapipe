@@ -6,18 +6,18 @@
             "role": "admin"
         },
         {
-            "username": "john",
-            "password": "john123",
+            "username": "vietha",
+            "password": "viet123",
             "role": "user"
         },
         {
-            "username": "alice",
-            "password": "alice123",
+            "username": "lamnt",
+            "password": "lam123",
             "role": "user"
         },
         {
-            "username": "bob",
-            "password": "bob123",
+            "username": "phuongdd",
+            "password": "phuong123",
             "role": "user"
         }
     ]
