@@ -15,13 +15,16 @@ from PyQt5.QtCore import Qt, QSettings, QEvent, QPoint, QMimeData, QUrl, QSize
 
 BASE_DIR = "F:/GitHub/Vexapipe"
 
-# Custom QPushButton subclass to support drag-and-drop
+# Custom QPushButton subclass to support drag-and-drop and context menu
 class DraggableButton(QPushButton):
-    def __init__(self, file_path, parent=None):
+    def __init__(self, file_path, asset_manager, parent=None):
         super().__init__(parent)
         self.file_path = file_path
+        self.asset_manager = asset_manager  # Reference to AssetManager
         self.start_pos = None
         self.setAcceptDrops(True)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
@@ -46,6 +49,76 @@ class DraggableButton(QPushButton):
         drag = QDrag(self)
         drag.setMimeData(mime_data)
         drag.exec_(Qt.CopyAction)
+
+    def show_context_menu(self, position):
+        menu = QMenu()
+
+        if not os.path.exists(self.file_path):
+            return
+
+        open_in_explorer = menu.addAction("Open in Explorer")
+        open_in_explorer.setShortcut("Ctrl+E")
+        copy_path = menu.addAction("Copy đường dẫn")
+        copy_path.setShortcut("Ctrl+C")
+        delete = menu.addAction("Delete")
+        delete.setShortcut("Ctrl+X")
+
+        action = menu.exec_(self.mapToGlobal(position))
+        if action == open_in_explorer:
+            self.open_in_explorer()
+        elif action == copy_path:
+            self.copy_path()
+        elif action == delete:
+            self.delete_file()
+
+    def open_in_explorer(self):
+        try:
+            folder_path = os.path.dirname(self.file_path)
+            os.startfile(folder_path)
+            message = f"Opened folder '{os.path.basename(folder_path)}' in Explorer..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.asset_manager.status_label.setText(message)  # Use asset_manager reference
+        except Exception as e:
+            message = f"Error opening Explorer: {str(e)}..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.asset_manager.status_label.setText(message)  # Use asset_manager reference
+
+    def copy_path(self):
+        clipboard = QApplication.clipboard()
+        folder_path = os.path.dirname(self.file_path)
+        clipboard.setText(folder_path)
+        message = f"Copied folder path of '{os.path.basename(folder_path)}' to clipboard..."
+        if len(message) > 50:
+            message = message[:47] + "..."
+        self.asset_manager.status_label.setText(message)  # Use asset_manager reference
+
+    def delete_file(self):
+        if not os.path.isfile(self.file_path):
+            message = f"Error: '{os.path.basename(self.file_path)}' is not a valid file..."
+            if len(message) > 50:
+                message = message[:47] + "..."
+            self.asset_manager.status_label.setText(message)  # Use asset_manager reference
+            return
+
+        reply = QMessageBox.question(self, "Xác nhận xóa",
+                                    f"Bạn có chắc muốn xóa file '{os.path.basename(self.file_path)}' không? Hành động này không thể hoàn tác!",
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            try:
+                os.remove(self.file_path)
+                message = f"Deleted '{os.path.basename(self.file_path)}' successfully..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.asset_manager.status_label.setText(message)  # Use asset_manager reference
+                # Reload the products list after deletion
+                self.asset_manager.load_products_list()
+            except Exception as e:
+                message = f"Error deleting: {str(e)}..."
+                if len(message) > 50:
+                    message = message[:47] + "..."
+                self.asset_manager.status_label.setText(message)  # Use asset_manager reference
 
 class AddAssetDialog(QDialog):
     def __init__(self, parent=None):
@@ -445,6 +518,7 @@ class AssetManager(QMainWindow):
 
         self.scenes_list.itemDoubleClicked.connect(self.open_scene_in_blender)
         self.scenes_list.viewport().installEventFilter(self)
+        self.scenes_list.installEventFilter(self)  # Install event filter for key presses
 
         products_layout = QVBoxLayout(self.products_tab)
         self.products_scroll_area = QScrollArea()
@@ -511,7 +585,42 @@ class AssetManager(QMainWindow):
                         self.show_asset_details(item)
                         break
 
+    def on_scene_selection_changed(self):
+        selected_items = self.scenes_list.selectedItems()
+        
+        # Reset the previous selection's style
+        if self.selected_scene_item_widget:
+            try:
+                self.selected_scene_item_widget.setStyleSheet("""
+                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; border-radius: 5px; padding: 10px; }
+                """)
+            except RuntimeError:
+                pass
+
+        if selected_items:
+            item = selected_items[0]
+            display_name = item.data(Qt.UserRole)
+            if display_name and display_name != "No Blender files found in scenefiles directories.":
+                self.selected_scene_item = item
+                self.selected_scene_item_widget = self.scenes_list.itemWidget(item)
+                try:
+                    self.selected_scene_item_widget.setStyleSheet("""
+                        QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; border-radius: 5px; padding: 10px; }
+                        QWidget#card-item * { background-color: #3c3f41; }
+                    """)
+                    message = f"Selected scene: {display_name}..."
+                    if len(message) > 50:
+                        message = message[:47] + "..."
+                    self.status_label.setText(message)
+                except RuntimeError:
+                    self.status_label.setText("Error updating scene selection.")
+        else:
+            self.selected_scene_item = None
+            self.selected_scene_item_widget = None
+            self.status_label.setText("No scene selected.")
+
     def eventFilter(self, source, event):
+        # Handle mouse events for selection in Scenes tab
         if source == self.scenes_list.viewport() and event.type() == QEvent.MouseButtonPress:
             pos = event.pos()
             item = self.scenes_list.itemAt(pos)
@@ -527,6 +636,7 @@ class AssetManager(QMainWindow):
                         self.status_label.setText("No scene selected.")
                     except RuntimeError as e:
                         print(f"RuntimeError in eventFilter: {str(e)}")
+        # Handle mouse events for selection in Products tab
         elif source == self.products_widget and event.type() == QEvent.MouseButtonPress:
             pos = event.pos()
             for i in reversed(range(self.products_grid.count())):
@@ -562,6 +672,28 @@ class AssetManager(QMainWindow):
                         self.status_label.setText("No product selected.")
                     except RuntimeError as e:
                         print(f"RuntimeError in eventFilter: {str(e)}")
+        # Handle key press events for Scenes tab shortcuts
+        elif source == self.scenes_list and event.type() == QEvent.KeyPress:
+            if self.scenes_list.hasFocus():
+                selected_items = self.scenes_list.selectedItems()
+                if selected_items:
+                    item = selected_items[0]
+                    display_name = item.data(Qt.UserRole)
+                    if display_name and display_name != "No Blender files found in scenefiles directories.":
+                        file_path = self.scene_file_paths.get(display_name)
+                        if file_path:
+                            # Ctrl+E: Open in Explorer
+                            if event.key() == Qt.Key_E and event.modifiers() == Qt.ControlModifier:
+                                self.open_in_explorer(file_path)
+                                return True
+                            # Ctrl+C: Copy Path
+                            elif event.key() == Qt.Key_C and event.modifiers() == Qt.ControlModifier:
+                                self.copy_path(file_path)
+                                return True
+                            # Ctrl+X: Delete
+                            elif event.key() == Qt.Key_X and event.modifiers() == Qt.ControlModifier:
+                                self.delete_file(file_path, os.path.basename(file_path), self.scenes_list, item)
+                                return True
         return super().eventFilter(source, event)
 
     def toggle_section(self, asset_type):
@@ -950,8 +1082,6 @@ class AssetManager(QMainWindow):
 
             item.setSelected(False)
 
-        self.scenes_list.itemClicked.connect(self.on_scene_item_clicked)
-
         if self.scenes_list.count() == 0:
             self.scenes_list.addItem("No Blender files found in scenefiles directories.")
         
@@ -1026,8 +1156,8 @@ class AssetManager(QMainWindow):
 
             file_format = os.path.splitext(file_name)[1][1:].lower()
 
-            # Use DraggableButton instead of QPushButton
-            product_btn = DraggableButton(file_path)
+            # Use DraggableButton with reference to self (AssetManager)
+            product_btn = DraggableButton(file_path, self)  # Pass self as asset_manager
             product_btn.setFixedSize(200, 150)
 
             # Tìm thumbnail
@@ -1070,28 +1200,9 @@ class AssetManager(QMainWindow):
         if not item:
             return
 
-        if self.selected_scene_item_widget:
-            try:
-                self.selected_scene_item_widget.setStyleSheet("""
-                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; border-radius: 5px; padding: 10px; }
-                """)
-            except RuntimeError:
-                pass
-
-        self.selected_scene_item = item
-        self.selected_scene_item_widget = self.scenes_list.itemWidget(item)
-
         display_name = item.data(Qt.UserRole)
         if not display_name or display_name == "No Blender files found in scenefiles directories.":
             return
-
-        try:
-            self.selected_scene_item_widget.setStyleSheet("""
-                QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; border-radius: 5px; padding: 10px; }
-                QWidget#card-item * { background-color: #3c3f41; }
-            """)
-        except RuntimeError:
-            pass
 
         file_path = self.scene_file_paths.get(display_name)
         if not file_path or not os.path.exists(file_path):
@@ -1543,81 +1654,3 @@ class AssetManager(QMainWindow):
 
         for shot_name in os.listdir(sequencer_dir):
             shot_dir = os.path.join(sequencer_dir, shot_name)
-            if not os.path.isdir(shot_dir):
-                continue
-
-            existing_shot = next((shot for shot in self.shots if shot["name"] == shot_name), None)
-            if existing_shot:
-                new_shots.append(existing_shot)
-            else:
-                scenefiles_dir = os.path.join(shot_dir, "scenefiles")
-                if os.path.exists(scenefiles_dir):
-                    blend_files = [f for f in os.listdir(scenefiles_dir) if f.endswith(".blend")]
-                    if blend_files:
-                        versions = [{
-                            "version": "v001",
-                            "description": "Auto-refreshed version",
-                            "file_path": f"03_Production/sequencer/{shot_name}/scenefiles/{self.project_short}_{shot_name}_blocking.blend"
-                        }]
-                        new_shot = {"name": shot_name, "versions": versions}
-                        new_shots.append(new_shot)
-
-        self.assets = new_assets
-        self.shots = new_shots
-        self.save_data()
-        self.load_data_ui()
-        if self.selected_asset:
-            self.select_asset_in_list(self.selected_asset["name"])
-        message = "Data refreshed successfully!..."
-        if len(message) > 50:
-            message = message[:47] + "..."
-        self.status_label.setText(message)
-
-    def on_scene_selection_changed(self):
-        selected_items = self.scenes_list.selectedItems()
-        if not selected_items:
-            if self.selected_scene_item_widget:
-                try:
-                    self.selected_scene_item_widget.setStyleSheet("""
-                        QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; }
-                    """)
-                except RuntimeError:
-                    pass
-            self.selected_scene_item = None
-            self.selected_scene_item_widget = None
-            self.status_label.setText("No scene selected.")
-        else:
-            item = selected_items[0]
-            self.on_scene_item_clicked(item)
-
-    def on_scene_item_clicked(self, item):
-        if self.selected_scene_item_widget:
-            try:
-                self.selected_scene_item_widget.setStyleSheet("""
-                    QWidget#card-item, QWidget#card-item * { background-color: #3c3f41; border: none; border-radius: 5px; padding: 10px; }
-                """)
-            except RuntimeError:
-                pass
-
-        self.selected_scene_item = item
-        self.selected_scene_item_widget = self.scenes_list.itemWidget(item)
-
-        display_name = item.data(Qt.UserRole)
-        if not display_name or display_name == "No Blender files found in scenefiles directories.":
-            self.status_label.setText("Invalid scene selected.")
-            return
-
-        try:
-            self.selected_scene_item_widget.setStyleSheet("""
-                QWidget#card-item { background-color: #3c3f41; border: 2px solid #4a90e2; border-radius: 5px; padding: 10px; }
-                QWidget#card-item * { background-color: #3c3f41; }
-            """)
-        except RuntimeError:
-            pass
-
-        file_path = self.scene_file_paths.get(display_name)
-        if file_path:
-            message = f"Selected scene: {os.path.basename(file_path)}..."
-            if len(message) > 50:
-                message = message[:47] + "..."
-            self.status_label.setText(message)
