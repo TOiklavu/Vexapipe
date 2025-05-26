@@ -487,20 +487,20 @@ class AssetManager(QMainWindow):
         self.tabs = QTabWidget()
         self.scenes_tab = QWidget()
         self.products_tab = QWidget()
-        self.media_tab = QWidget()
         self.libraries_tab = QWidget()
+        self.media_tab = QWidget()
         self.tasks_tab = QWidget()
 
         scenes_icon_path = os.path.join(self.icons_dir, "scenes_icon.png")
         products_icon_path = os.path.join(self.icons_dir, "products_icon.png")
-        media_icon_path = os.path.join(self.icons_dir, "media_icon.png")
         libraries_icon_path = os.path.join(self.icons_dir, "libraries_icon.png")
+        media_icon_path = os.path.join(self.icons_dir, "media_icon.png")
         tasks_icon_path = os.path.join(self.icons_dir, "tasks_icon.png")
 
         self.tabs.addTab(self.scenes_tab, QIcon(scenes_icon_path) if os.path.exists(scenes_icon_path) else QIcon(), "Scenes")
         self.tabs.addTab(self.products_tab, QIcon(products_icon_path) if os.path.exists(products_icon_path) else QIcon(), "Products")
-        self.tabs.addTab(self.media_tab, QIcon(media_icon_path) if os.path.exists(media_icon_path) else QIcon(), "Media")
         self.tabs.addTab(self.libraries_tab, QIcon(libraries_icon_path) if os.path.exists(libraries_icon_path) else QIcon(), "Libraries")
+        self.tabs.addTab(self.media_tab, QIcon(media_icon_path) if os.path.exists(media_icon_path) else QIcon(), "Media")
         self.tabs.addTab(self.tasks_tab, QIcon(tasks_icon_path) if os.path.exists(tasks_icon_path) else QIcon(), "Tasks")
 
         self.tabs.tabBar().setMinimumSize(100, 30)
@@ -529,6 +529,15 @@ class AssetManager(QMainWindow):
         products_layout.addWidget(self.products_scroll_area)
         self.products_widget.installEventFilter(self)
 
+        libraries_layout = QVBoxLayout(self.libraries_tab)
+        self.libraries_scroll_area = QScrollArea()
+        self.libraries_scroll_area.setWidgetResizable(True)
+        self.libraries_widget = QWidget()
+        self.libraries_grid = QGridLayout(self.libraries_widget)
+        self.libraries_scroll_area.setWidget(self.libraries_widget)
+        libraries_layout.addWidget(self.libraries_scroll_area)
+        self.libraries_widget.installEventFilter(self)
+
         media_layout = QVBoxLayout(self.media_tab)
         # Để trống tab Media
 
@@ -544,8 +553,6 @@ class AssetManager(QMainWindow):
 
         self.asset_table.horizontalHeader().setStretchLastSection(True)
         self.asset_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-
-        libraries_layout = QVBoxLayout(self.libraries_tab)
 
         right_layout.addWidget(self.tabs)
 
@@ -584,6 +591,188 @@ class AssetManager(QMainWindow):
                         asset_list.setCurrentItem(item)
                         self.show_asset_details(item)
                         break
+
+    def load_products_list(self):
+        # Xóa các widget cũ trong grid
+        for i in reversed(range(self.products_grid.count())):
+            widget = self.products_grid.itemAt(i).widget()
+            if widget:
+                widget.deleteLater()
+
+        self.product_file_paths.clear()
+        self.selected_product_item = None
+        self.selected_product_item_widget = None
+
+        if not self.selected_asset and not self.selected_shot:
+            no_products_btn = QPushButton("Please select an asset or shot to view products.")
+            no_products_btn.setFixedSize(200, 150)
+            no_products_btn.setEnabled(False)
+            self.products_grid.addWidget(no_products_btn, 0, 0)
+            return
+
+        if self.selected_asset:
+            asset_name = self.selected_asset["name"]
+            asset_type = self.selected_asset["type"].lower()
+            asset_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}")
+            outputs_dir = os.path.join(asset_dir, "outputs")
+            old_dir = os.path.join(outputs_dir, ".old")
+            thumbnail_path = self.default_thumbnail
+        elif self.selected_shot:
+            shot_name = self.selected_shot["name"]
+            asset_dir = os.path.join(self.project_path, f"03_Production/sequencer/{shot_name}")
+            outputs_dir = os.path.join(asset_dir, "outputs")
+            old_dir = os.path.join(outputs_dir, ".old")
+            thumbnail_path = self.default_thumbnail
+            asset_name = shot_name
+
+        if not os.path.exists(outputs_dir):
+            no_products_btn = QPushButton("No outputs directory found.")
+            no_products_btn.setFixedSize(200, 150)
+            no_products_btn.setEnabled(False)
+            self.products_grid.addWidget(no_products_btn, 0, 0)
+            print(f"Outputs directory not found: {outputs_dir}")
+            return
+
+        product_files = [f for f in os.listdir(outputs_dir) if f.endswith((".usd", ".fbx", ".abc")) and f.startswith(f"{self.project_short}_{asset_name}_")]
+
+        row = 0
+        col = 0
+        product_found = False
+        for file_name in product_files:
+            file_path = os.path.join(outputs_dir, file_name)
+            display_name = file_name
+
+            stage = None
+            for s in ["model", "rig", "animation"]:
+                if f"_{s}." in file_name.lower():
+                    stage = s.capitalize()
+                    break
+            if not stage:
+                stage = "Unknown"
+
+            latest_version = "v001"
+            if os.path.exists(old_dir):
+                old_files = [f for f in os.listdir(old_dir) if f.startswith(f"{self.project_short}_{asset_name}_{stage.lower()}") and f.endswith(file_name[-4:])]
+                if old_files:
+                    versions = [int(re.search(r'_v(\d{3})\.', f).group(1)) for f in old_files if re.search(r'_v(\d{3})\.', f)]
+                    if versions:
+                        latest_version = f"v{max(versions):03d}"
+
+            file_format = os.path.splitext(file_name)[1][1:].lower()
+
+            product_btn = DraggableButton(file_path, self)
+            product_btn.setFixedSize(200, 150)
+
+            if os.path.exists(thumbnail_path):
+                pixmap = QPixmap(thumbnail_path)
+                if not pixmap.isNull():
+                    product_btn.setIcon(QIcon(pixmap))
+                    product_btn.setIconSize(QSize(180, 120))
+            else:
+                default_icon_path = os.path.join(BASE_DIR, "Resources", "default_icons", "default_product_icon.png")
+                if os.path.exists(default_icon_path):
+                    product_btn.setIcon(QIcon(default_icon_path))
+                    product_btn.setIconSize(QSize(180, 120))
+                else:
+                    product_btn.setText(f"{stage}\n({file_format})")
+
+            product_btn.setText(file_name)
+            product_btn.setObjectName("product-item")
+            self.products_grid.addWidget(product_btn, row, col)
+
+            self.product_file_paths[display_name] = file_path
+
+            col += 1
+            if col > 3:
+                col = 0
+                row += 1
+
+            product_found = True
+
+        if not product_found:
+            no_products_btn = QPushButton("No product files found in outputs directory.")
+            no_products_btn.setFixedSize(200, 150)
+            no_products_btn.setEnabled(False)
+            self.products_grid.addWidget(no_products_btn, 0, 0)
+
+        self.products_widget.repaint()
+        self.products_scroll_area.repaint()
+        QApplication.processEvents()
+
+    def load_libraries_list(self):
+        # Xóa các widget cũ trong grid
+        for i in reversed(range(self.libraries_grid.count())):
+            widget = self.libraries_grid.itemAt(i).widget()
+            if widget:
+                widget.deleteLater()
+
+        if not self.selected_asset:
+            no_libraries_btn = QPushButton("Please select an asset to view libraries.")
+            no_libraries_btn.setFixedSize(200, 150)
+            no_libraries_btn.setEnabled(False)
+            self.libraries_grid.addWidget(no_libraries_btn, 0, 0)
+            self.status_label.setText("No asset selected for libraries.")
+            return
+
+        asset_name = self.selected_asset["name"]
+        asset_type = self.selected_asset["type"].lower()
+        textures_dir = os.path.join(self.project_path, f"03_Production/assets/{asset_type}/{asset_name}/textures")
+
+        if not os.path.exists(textures_dir):
+            no_libraries_btn = QPushButton("No textures directory found.")
+            no_libraries_btn.setFixedSize(200, 150)
+            no_libraries_btn.setEnabled(False)
+            self.libraries_grid.addWidget(no_libraries_btn, 0, 0)
+            self.status_label.setText(f"Textures directory not found: {os.path.basename(textures_dir)}")
+            return
+
+        image_files = [f for f in os.listdir(textures_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
+
+        if not image_files:
+            no_libraries_btn = QPushButton("No image files found in textures directory.")
+            no_libraries_btn.setFixedSize(200, 150)
+            no_libraries_btn.setEnabled(False)
+            self.libraries_grid.addWidget(no_libraries_btn, 0, 0)
+            self.status_label.setText("No images found in textures directory.")
+            return
+
+        row = 0
+        col = 0
+        for file_name in image_files:
+            file_path = os.path.join(textures_dir, file_name)
+            display_name = file_name
+
+            image_btn = DraggableButton(file_path, self)
+            image_btn.setFixedSize(200, 150)
+
+            pixmap = QPixmap(file_path)
+            if not pixmap.isNull():
+                image_btn.setIcon(QIcon(pixmap))
+                image_btn.setIconSize(QSize(180, 120))
+            else:
+                image_btn.setText(f"{os.path.splitext(file_name)[0]}\n({os.path.splitext(file_name)[1][1:].upper()})")
+
+            image_btn.setText(file_name)
+            image_btn.setObjectName("library-item")
+            self.libraries_grid.addWidget(image_btn, row, col)
+
+            col += 1
+            if col > 3:
+                col = 0
+                row += 1
+
+        self.libraries_widget.repaint()
+        self.libraries_scroll_area.repaint()
+        self.status_label.setText(f"Loaded {len(image_files)} images from {os.path.basename(textures_dir)}.")
+        QApplication.processEvents()
+
+    def on_right_tab_changed(self, index):
+        if self.tabs.widget(index) == self.products_tab:
+            self.load_products_list()
+        elif self.tabs.widget(index) == self.libraries_tab:
+            self.load_libraries_list()
+        elif self.tabs.widget(index) == self.scenes_tab:
+            self.load_scenes_list()
 
     def on_scene_selection_changed(self):
         selected_items = self.scenes_list.selectedItems()
@@ -641,7 +830,7 @@ class AssetManager(QMainWindow):
             pos = event.pos()
             for i in reversed(range(self.products_grid.count())):
                 widget = self.products_grid.itemAt(i).widget()
-                if widget and isinstance(widget, QPushButton) and widget.geometry().contains(pos):
+                if widget and isinstance(widget, DraggableButton) and widget.geometry().contains(pos):
                     if widget != self.selected_product_item_widget:
                         if self.selected_product_item_widget:
                             try:
@@ -655,12 +844,11 @@ class AssetManager(QMainWindow):
                             widget.setStyleSheet("""
                                 QPushButton { background-color: #3c3f41; border: 2px solid #4a90e2; }
                             """)
+                            self.status_label.setText(f"Selected product: {widget.text()}...")
+                            if len(self.status_label.text()) > 50:
+                                self.status_label.setText(self.status_label.text()[:47] + "...")
                         except RuntimeError as e:
                             print(f"RuntimeError in eventFilter: {str(e)}")
-                        message = f"Selected product: {widget.text()}..."
-                        if len(message) > 50:
-                            message = message[:47] + "..."
-                        self.status_label.setText(message)
                     break
             else:
                 if self.selected_product_item_widget:
@@ -672,28 +860,74 @@ class AssetManager(QMainWindow):
                         self.status_label.setText("No product selected.")
                     except RuntimeError as e:
                         print(f"RuntimeError in eventFilter: {str(e)}")
-        # Handle key press events for Scenes tab shortcuts
-        elif source == self.scenes_list and event.type() == QEvent.KeyPress:
-            if self.scenes_list.hasFocus():
-                selected_items = self.scenes_list.selectedItems()
-                if selected_items:
-                    item = selected_items[0]
-                    display_name = item.data(Qt.UserRole)
-                    if display_name and display_name != "No Blender files found in scenefiles directories.":
+        # Handle mouse events for selection in Libraries tab
+        elif source == self.libraries_widget and event.type() == QEvent.MouseButtonPress:
+            pos = event.pos()
+            for i in reversed(range(self.libraries_grid.count())):
+                widget = self.libraries_grid.itemAt(i).widget()
+                if widget and isinstance(widget, DraggableButton) and widget.geometry().contains(pos):
+                    if widget != self.selected_library_item_widget:
+                        if self.selected_library_item_widget:
+                            try:
+                                self.selected_library_item_widget.setStyleSheet("""
+                                    QPushButton { background-color: #3c3f41; border: none; }
+                                """)
+                            except RuntimeError as e:
+                                print(f"RuntimeError in eventFilter: {str(e)}")
+                        self.selected_library_item_widget = widget
+                        try:
+                            widget.setStyleSheet("""
+                                QPushButton { background-color: #3c3f41; border: 2px solid #4a90e2; }
+                            """)
+                            self.status_label.setText(f"Selected image: {widget.text()}...")
+                            if len(self.status_label.text()) > 50:
+                                self.status_label.setText(self.status_label.text()[:47] + "...")
+                        except RuntimeError as e:
+                            print(f"RuntimeError in eventFilter: {str(e)}")
+                    break
+            else:
+                if self.selected_library_item_widget:
+                    try:
+                        self.selected_library_item_widget.setStyleSheet("""
+                            QPushButton { background-color: #3c3f41; border: none; }
+                        """)
+                        self.selected_library_item_widget = None
+                        self.status_label.setText("No image selected.")
+                    except RuntimeError as e:
+                        print(f"RuntimeError in eventFilter: {str(e)}")
+        # Handle key press events for shortcuts
+        elif (source == self.products_widget or source == self.libraries_widget or source == self.scenes_list) and event.type() == QEvent.KeyPress:
+            if self.selected_product_item_widget or self.selected_library_item_widget or self.selected_scene_item:
+                if event.key() == Qt.Key_E and event.modifiers() == Qt.ControlModifier:
+                    if self.selected_product_item_widget:
+                        self.open_in_explorer(self.product_file_paths.get(self.selected_product_item_widget.text()))
+                    elif self.selected_library_item_widget:
+                        self.open_in_explorer(self.selected_library_item_widget.file_path)
+                    elif self.selected_scene_item:
+                        display_name = self.selected_scene_item.data(Qt.UserRole)
                         file_path = self.scene_file_paths.get(display_name)
-                        if file_path:
-                            # Ctrl+E: Open in Explorer
-                            if event.key() == Qt.Key_E and event.modifiers() == Qt.ControlModifier:
-                                self.open_in_explorer(file_path)
-                                return True
-                            # Ctrl+C: Copy Path
-                            elif event.key() == Qt.Key_C and event.modifiers() == Qt.ControlModifier:
-                                self.copy_path(file_path)
-                                return True
-                            # Ctrl+X: Delete
-                            elif event.key() == Qt.Key_X and event.modifiers() == Qt.ControlModifier:
-                                self.delete_file(file_path, os.path.basename(file_path), self.scenes_list, item)
-                                return True
+                        self.open_in_explorer(file_path)
+                    return True
+                elif event.key() == Qt.Key_C and event.modifiers() == Qt.ControlModifier:
+                    if self.selected_product_item_widget:
+                        self.copy_path(self.product_file_paths.get(self.selected_product_item_widget.text()))
+                    elif self.selected_library_item_widget:
+                        self.copy_path(self.selected_library_item_widget.file_path)
+                    elif self.selected_scene_item:
+                        display_name = self.selected_scene_item.data(Qt.UserRole)
+                        file_path = self.scene_file_paths.get(display_name)
+                        self.copy_path(file_path)
+                    return True
+                elif event.key() == Qt.Key_X and event.modifiers() == Qt.ControlModifier:
+                    if self.selected_product_item_widget:
+                        self.delete_file(self.product_file_paths.get(self.selected_product_item_widget.text()), os.path.basename(self.product_file_paths.get(self.selected_product_item_widget.text())), self.products_widget)
+                    elif self.selected_library_item_widget:
+                        self.delete_file(self.selected_library_item_widget.file_path, os.path.basename(self.selected_library_item_widget.file_path), self.libraries_widget)
+                    elif self.selected_scene_item:
+                        display_name = self.selected_scene_item.data(Qt.UserRole)
+                        file_path = self.scene_file_paths.get(display_name)
+                        self.delete_file(file_path, os.path.basename(file_path), self.scenes_list, self.selected_scene_item)
+                    return True
         return super().eventFilter(source, event)
 
     def toggle_section(self, asset_type):
@@ -1361,8 +1595,8 @@ class AssetManager(QMainWindow):
             self.settings.setValue("selected_asset", asset_name)
             self.settings.remove("selected_shot")
             self.load_scenes_list()
-            if self.tabs.currentWidget() == self.products_tab:
-                self.load_products_list()
+            self.load_products_list()
+            self.load_libraries_list()
 
     def show_shot_details(self, item):
         if not item:
@@ -1426,6 +1660,10 @@ class AssetManager(QMainWindow):
     def on_right_tab_changed(self, index):
         if self.tabs.widget(index) == self.products_tab:
             self.load_products_list()
+        elif self.tabs.widget(index) == self.libraries_tab:
+            self.load_libraries_list()
+        elif self.tabs.widget(index) == self.scenes_tab:
+            self.load_scenes_list()
 
     def add_asset(self):
         dialog = AddAssetDialog(self)
