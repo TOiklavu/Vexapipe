@@ -30,7 +30,6 @@ class LibraryItemWidget(QWidget):
         self.container.setObjectName("thumbnail_container")
         self.container.setStyleSheet("""
             QWidget#thumbnail_container {
-                background-color: #3c3f41;
                 border: 2px solid transparent;
                 border-radius: 5px;
             }
@@ -71,7 +70,7 @@ class LibraryItemWidget(QWidget):
         name = os.path.basename(self.file_path).upper()
         name_label = QLabel(name)
         name_label.setAlignment(Qt.AlignCenter)
-        name_label.setStyleSheet("font-weight: bold; color: white; font-size: 12px;")
+        name_label.setStyleSheet("font-weight: bold; color: black; font-size: 12px;")
         layout.addWidget(name_label)
 
         # Metadata
@@ -92,46 +91,6 @@ class LibraryItemWidget(QWidget):
     def enterEvent(self, event):
         self.container.setStyleSheet("""
             QWidget#thumbnail_container {
-                background-color: #505050;
-                border: 2px solid #aaaaaa;
-                border-radius: 5px;
-            }
-        """)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        if self.asset_manager.selected_library_item_widget != self:
-            self.reset_style()
-        super().leaveEvent(event)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.RightButton:
-            self.show_context_menu(event.pos())
-        elif event.button() == Qt.LeftButton:
-            self.asset_manager.select_library_item(self)
-            self.drag_start_position = event.pos()
-
-    def mouseMoveEvent(self, event):
-        if not (event.buttons() & Qt.LeftButton):
-            return
-        if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
-            return
-
-        drag = QDrag(self)
-        mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile(self.file_path)])
-        drag.setMimeData(mime)
-
-        pixmap = QPixmap(self.file_path)
-        if not pixmap.isNull():
-            drag.setPixmap(pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            drag.setHotSpot(QPoint(50, 50))
-
-        drag.exec_(Qt.CopyAction)
-
-    def enterEvent(self, event):
-        self.container.setStyleSheet("""
-            QWidget#thumbnail_container {
                 background-color: #d9d9d9;
                 border: 2px solid #aaaaaa;
                 border-radius: 5px;
@@ -143,12 +102,6 @@ class LibraryItemWidget(QWidget):
         if self.asset_manager.selected_library_item_widget != self:
             self.reset_style()
         super().leaveEvent(event)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.RightButton:
-            self.show_context_menu(event.pos())
-        elif event.button() == Qt.LeftButton:
-            self.asset_manager.select_library_item(self)
 
     def show_context_menu(self, pos):
         menu = QMenu()
@@ -169,7 +122,6 @@ class LibraryItemWidget(QWidget):
     def reset_style(self):
         self.container.setStyleSheet("""
             QWidget#thumbnail_container {
-                background-color: #ededed;
                 border: 2px solid transparent;
                 border-radius: 5px;
             }
@@ -182,28 +134,24 @@ class LibraryItemWidget(QWidget):
             self.asset_manager.select_library_item(self)
             self.drag_start_position = event.pos()  # Bắt đầu điểm kéo
 
-        def mouseMoveEvent(self, event):
-            if not (event.buttons() & Qt.LeftButton):
-                return
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.LeftButton):
+            return
+        if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
+            return
 
-            if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
-                return
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(self.file_path)])
+        drag.setMimeData(mime)
 
-            drag = QDrag(self)
-            mime_data = QMimeData()
-            mime_data.setUrls([QUrl.fromLocalFile(self.file_path)])
+        pixmap = QPixmap(self.file_path)
+        if not pixmap.isNull():
+            drag.setPixmap(pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            drag.setHotSpot(QPoint(50, 50))
 
-            drag.setMimeData(mime_data)
-
-            # Hiển thị thumbnail khi drag
-            pixmap = QPixmap(self.file_path)
-            if not pixmap.isNull():
-                preview = pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                drag.setPixmap(preview)
-                drag.setHotSpot(QPoint(preview.width() // 2, preview.height() // 2))
-
-            drag.exec_(Qt.CopyAction)        
-
+        drag.exec_(Qt.CopyAction)
+        
 # Custom QPushButton subclass to support drag-and-drop and context menu
 class DraggableButton(QPushButton):
     def __init__(self, file_path, asset_manager, parent=None):
@@ -424,8 +372,6 @@ class AssetManager(QMainWindow):
 
         self.init_ui()
 
-        
-
     def select_library_item(self, widget):
         if hasattr(self, "selected_library_item_widget") and self.selected_library_item_widget:
             try:
@@ -436,7 +382,6 @@ class AssetManager(QMainWindow):
         self.selected_library_item_widget = widget
         widget.highlight_selected()
         self.status_label.setText(f"Selected image: {os.path.basename(widget.file_path)}")
-
 
     def _create_initial_structure(self):
         folders = ["00_Pipeline", "00_Pipeline/assets", "01_Management", "02_Designs", "03_Production", "04_Resources"]
@@ -700,6 +645,8 @@ class AssetManager(QMainWindow):
         libraries_layout.addWidget(self.libraries_list)
     
         self.libraries_list.itemDoubleClicked.connect(self.preview_library_item)
+        self.libraries_list.installEventFilter(self)
+
 
         media_layout = QVBoxLayout(self.media_tab)
         # Để trống tab Media
@@ -889,7 +836,6 @@ class AssetManager(QMainWindow):
 
         self.status_label.setText(f"Loaded {len(image_files)} image(s).")
 
-
     def preview_library_item(self, item):
         file_path = item.data(Qt.UserRole)
         if not os.path.exists(file_path):
@@ -990,7 +936,6 @@ class AssetManager(QMainWindow):
         selected_mode = self.library_view_selector.currentText()
         self.library_view_mode = "Thumbnail" if "Thumbnail" in selected_mode else "Detail"
         self.load_libraries_list()
-
 
     def show_context_menu(self, position):
         widget = self.sender()
@@ -1919,3 +1864,15 @@ class AssetManager(QMainWindow):
 
         for shot_name in os.listdir(sequencer_dir):
             shot_dir = os.path.join(sequencer_dir, shot_name)
+
+def eventFilter(self, source, event):
+    if source == self.libraries_list.viewport():
+        if event.type() == QEvent.MouseButtonPress:
+            pos = event.pos()
+            item = self.libraries_list.itemAt(pos)
+            if item is None:
+                # Click vào khoảng trống, bỏ chọn
+                if self.selected_library_item_widget:
+                    self.selected_library_item_widget.reset_style()
+                    self.selected_library_item_widget = None
+    return super().eventFilter(source, event)
