@@ -1,8 +1,8 @@
 {
     "users": [
         {
-            "username": "admin",
-            "password": "admin123",
+            "username": "vuna",
+            "password": "vuna123",
             "role": "admin"
         },
         {
