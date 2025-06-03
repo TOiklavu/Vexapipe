@@ -347,9 +347,7 @@ class ShotTab(QWidget):
                 # Lấy last_user từ latest_user.json
                 user_name = ""
                 if self.project_root:
-                    latest_user_file = os.path.join(
-                        self.project_root, "00_Pipeline", "data", "latest_user.json"
-                    )
+                    latest_user_file = os.path.join(BASE_DIR, "data", "latest_user.json")
                     if os.path.exists(latest_user_file):
                         try:
                             with open(latest_user_file, "r", encoding="utf-8") as uf:
