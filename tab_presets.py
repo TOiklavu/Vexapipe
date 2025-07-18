@@ -3,7 +3,7 @@ import time
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QGridLayout, QScrollArea, QMenu, QAction, QActionGroup,
-    QApplication, QShortcut, QSizePolicy
+    QApplication, QShortcut, QSizePolicy, QPushButton
 )
 from PyQt5.QtGui import QPixmap, QFont, QFontMetrics, QKeySequence, QDrag
 from PyQt5.QtCore import Qt, QEvent, QPoint, QMimeData, QUrl
@@ -13,15 +13,8 @@ BASE_DIR = os.path.dirname(__file__)
 PRODUCTS_FOLDER = os.path.join(BASE_DIR, "Products")
 
 class CustomItemWidget(QWidget):
-    def __init__(self,
-                 title: str,
-                 image_path: str,
-                 text1: str = "",
-                 text2: str = "",
-                 text3: str = "",
-                 parent_tab=None):
+    def __init__(self, title: str, image_path: str, text1: str = "", text2: str = "", text3: str = "", parent_tab=None):
         super().__init__()
-
         self.title = title
         self.text1 = text1
         self.text2 = text2
@@ -31,10 +24,13 @@ class CustomItemWidget(QWidget):
         self._hovered = False
         self._selected = False
         self.file_path = image_path
+        self.drive_path = None  # Thêm thuộc tính drive_path
+        self.local_path = None  # Thêm thuộc tính local_path
 
         self.stack = QStackedWidget(self)
         self.stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
+        # Thumbnail view
         thumb = QWidget()
         thumb.setObjectName("card")
         t_layout = QVBoxLayout(thumb)
@@ -69,8 +65,15 @@ class CustomItemWidget(QWidget):
             self.sub_labels.append(label)
 
         t_layout.addLayout(text_layout)
+
+        # Thêm nút Download cho thumbnail view
+        self.download_btn = QPushButton("Download")
+        self.download_btn.setFixedSize(80, 24)
+        t_layout.addWidget(self.download_btn, alignment=Qt.AlignCenter)
+
         self.stack.addWidget(thumb)
 
+        # List view
         lst = QWidget()
         lst.setObjectName("card")
         lst.setFixedHeight(80)
@@ -109,6 +112,12 @@ class CustomItemWidget(QWidget):
 
         info.addLayout(text_row)
         l_layout.addLayout(info)
+
+        # Thêm nút Download cho list view
+        self.download_btn_list = QPushButton("Download")
+        self.download_btn_list.setFixedSize(80, 24)
+        l_layout.addWidget(self.download_btn_list, alignment=Qt.AlignRight)
+
         self.stack.addWidget(lst)
 
         main_layout = QVBoxLayout(self)
@@ -119,20 +128,25 @@ class CustomItemWidget(QWidget):
         self.setAttribute(Qt.WA_Hover)
         self.installEventFilter(self)
 
+        # Đồng bộ hóa hành động của hai nút Download
+        self.download_btn.clicked.connect(self.on_download_clicked)
+        self.download_btn_list.clicked.connect(self.on_download_clicked)
+
+    def on_download_clicked(self):
+        if self.parent_tab and hasattr(self.parent_tab, 'download'):
+            self.parent_tab.download(self)
+
     def switch_view(self, mode: str):
         idx = 0 if mode == "thumbnail" else 1
         self.stack.setCurrentIndex(idx)
-
         if mode == "thumbnail":
-            self.setFixedSize(180, 220)
+            self.setFixedSize(180, 220 + 30)  # Tăng chiều cao để chứa nút Download
             self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         else:
             self.setFixedHeight(80)
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            self.setMaximumWidth(16777215)  # max width tự động giãn
+            self.setMaximumWidth(16777215)
             self.setMinimumWidth(0)
-            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
         self.view_mode = mode
         self.update_style()
 

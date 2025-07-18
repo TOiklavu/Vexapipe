@@ -138,6 +138,12 @@ class ProjectSelectionDialog(QDialog):
             self.add_btn.setEnabled(True)
             self.load_projects()
 
+    def clear_selection(self):
+            for i in range(self.grid.count()):
+                widget = self.grid.itemAt(i).widget()
+                if isinstance(widget, CustomItemWidget):
+                    widget.set_selected(False)
+
     def on_choose_drive(self):
         path = QFileDialog.getExistingDirectory(self, "Chọn Drive folder", "")
         if path:
